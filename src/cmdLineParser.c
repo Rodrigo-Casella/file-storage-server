@@ -9,11 +9,12 @@ extern char *optarg;
 extern int optopt, optind;
 
 #define CHECK_OPTIONAL_ARGUMENT \
- if(!optarg && optind < argc && argv[optind][0] != '-') \
+ if (!optarg && optind < argc && argv[optind][0] != '-') \
  { \
     optarg = argv[optind++]; \
  } \
-    
+
+#define CHECK_ARGUMENT (optarg && optarg[0] == '-')
 
 static Option *allocOption(char opt, char *arg)
 {
@@ -26,7 +27,7 @@ static Option *allocOption(char opt, char *arg)
     }
 
     newOption->opt = opt;
-
+    newOption->arg = NULL;
     if (arg)
     {
         size_t argLength = strlen(arg) + 1;
@@ -104,10 +105,10 @@ OptionList *parseCmdLine(int argc, char *argv[])
         switch (opt)
         {
         case '?':
-            fprintf(stderr, "%c non è riconosciuta come opzione\n", optopt);
+            fprintf(stderr, "-%c non è riconosciuta come opzione\n", optopt);
             break;
         case ':':
-            fprintf(stderr, "%c necessita di un argomento\n", optopt);
+            fprintf(stderr, "-%c necessita di un argomento\n", optopt);
             break;
 
         case 'R':
@@ -116,9 +117,11 @@ OptionList *parseCmdLine(int argc, char *argv[])
                 addOption(list, opt, "n=0");
                 break;
             }
+            addOption(list, opt, optarg);
+            break;
         default:
-            if (optarg[0] == '-') {
-                fprintf(stderr, "%c necessita di un argomento\n", opt);
+            if (CHECK_ARGUMENT) {
+                fprintf(stderr, "-%c argomento non valido\n", opt);
                 optind--;
                 break;
             }
@@ -136,7 +139,7 @@ void printOptionList(OptionList *list)
 
     while (tmp)
     {
-        printf("Opt %c--->%s\n", tmp->opt, (!tmp->arg ? "NULL" : tmp->arg));
+        printf("Opt -%c ---> %s\n", tmp->opt, (!tmp->arg ? "NULL" : tmp->arg));
         tmp = tmp->next;
     }
 }
