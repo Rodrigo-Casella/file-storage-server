@@ -11,7 +11,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Errore parsando linea di comando\n");
     }
 
-    printOptionList(list);
     freeOptionList(list);
     return 0;
 }

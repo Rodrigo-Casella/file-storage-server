@@ -74,6 +74,39 @@ static void addOption(OptionList *list, char opt, char *arg)
     }
 }
 
+Option *getOption(OptionList *list, char opt)
+{
+    if (!list) {
+        fprintf(stderr, "getOption: lista vuota");
+        return NULL;
+    }
+
+    Option *curr = list->head, *prev = NULL, *option = NULL;
+
+    while (curr)
+    {
+        if (curr->opt == opt) {
+            option = curr;
+            
+            if (!prev) {
+                list->head = curr->next;
+                break;
+            }
+
+            if (curr == list->tail) {
+                list->tail = prev;
+                break;
+            }
+
+            prev->next = curr->next;
+            break;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+    return option;
+}
+
 static OptionList *initList()
 {
     OptionList *newList = malloc(sizeof(*newList));
@@ -133,15 +166,25 @@ OptionList *parseCmdLine(int argc, char *argv[])
     return list;
 }
 
+void printOption(Option *option)
+{
+    if (option) printf("Opt -%c ---> %s\n", option->opt, (!option->arg ? "NULL" : option->arg));
+}
+
 void printOptionList(OptionList *list)
 {
     Option *tmp = list->head;
 
     while (tmp)
     {
-        printf("Opt -%c ---> %s\n", tmp->opt, (!tmp->arg ? "NULL" : tmp->arg));
+        printOption(tmp);
         tmp = tmp->next;
     }
+}
+
+void freeOption(Option *option) {
+    if (option->arg) free(option->arg);
+    free(option);
 }
 
 void freeOptionList(OptionList *list)
@@ -151,9 +194,7 @@ void freeOptionList(OptionList *list)
     while (tmp)
     {
         list->head = list->head->next;
-        if (tmp->arg)
-            free(tmp->arg);
-        free(tmp);
+        freeOption(tmp);
         tmp = list->head;
     }
 
