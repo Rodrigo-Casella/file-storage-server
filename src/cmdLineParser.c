@@ -8,11 +8,11 @@
 extern char *optarg;
 extern int optopt, optind;
 
-#define CHECK_OPTIONAL_ARGUMENT \
- if (!optarg && optind < argc && argv[optind][0] != '-') \
- { \
-    optarg = argv[optind++]; \
- } \
+#define CHECK_OPTIONAL_ARGUMENT                             \
+    if (!optarg && optind < argc && argv[optind][0] != '-') \
+    {                                                       \
+        optarg = argv[optind++];                            \
+    }
 
 #define CHECK_ARGUMENT (optarg && optarg[0] == '-')
 
@@ -76,7 +76,8 @@ static void addOption(OptionList *list, char opt, char *arg)
 
 Option *getOption(OptionList *list, char opt)
 {
-    if (!list) {
+    if (!list)
+    {
         fprintf(stderr, "getOption: lista vuota");
         return NULL;
     }
@@ -85,16 +86,20 @@ Option *getOption(OptionList *list, char opt)
 
     while (curr)
     {
-        if (curr->opt == opt) {
+        if (curr->opt == opt)
+        {
             option = curr;
-            
-            if (!prev) {
+
+            if (!prev)
+            {
                 list->head = curr->next;
                 break;
             }
 
-            if (curr == list->tail) {
+            if (curr == list->tail)
+            {
                 list->tail = prev;
+                prev->next = NULL;
                 break;
             }
 
@@ -133,7 +138,7 @@ OptionList *parseCmdLine(int argc, char *argv[])
         return NULL;
     }
 
-    for (int opt = 0; (opt = getopt(argc, argv, ":hf:w:W:D:r:R::d:t:l:c:u:p")) != -1;)
+    for (int opt = 0; (opt = getopt(argc, argv, ":hf:w:W:D:r:R::d:t:l:u:c:p")) != -1;)
     {
         switch (opt)
         {
@@ -145,15 +150,17 @@ OptionList *parseCmdLine(int argc, char *argv[])
             break;
 
         case 'R':
-            CHECK_OPTIONAL_ARGUMENT; 
-            if (!optarg) {
+            CHECK_OPTIONAL_ARGUMENT;
+            if (!optarg)
+            {
                 addOption(list, opt, "n=0");
                 break;
             }
             addOption(list, opt, optarg);
             break;
         default:
-            if (CHECK_ARGUMENT) {
+            if (CHECK_ARGUMENT)
+            {
                 fprintf(stderr, "-%c argomento non valido\n", opt);
                 optind--;
                 break;
@@ -168,7 +175,8 @@ OptionList *parseCmdLine(int argc, char *argv[])
 
 void printOption(Option *option)
 {
-    if (option) printf("Opt -%c ---> %s\n", option->opt, (!option->arg ? "NULL" : option->arg));
+    if (option)
+        printf("Opt -%c ---> %s\n", option->opt, (!option->arg ? "NULL" : option->arg));
 }
 
 void printOptionList(OptionList *list)
@@ -182,8 +190,10 @@ void printOptionList(OptionList *list)
     }
 }
 
-void freeOption(Option *option) {
-    if (option->arg) free(option->arg);
+void freeOption(Option *option)
+{
+    if (option->arg)
+        free(option->arg);
     free(option);
 }
 
