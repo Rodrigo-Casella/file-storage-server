@@ -192,9 +192,13 @@ void printOptionList(OptionList *list)
 
 void freeOption(Option *option)
 {
-    if (option->arg)
-        free(option->arg);
-    free(option);
+    if (option)
+    {
+        if (option->arg)
+            free(option->arg);
+
+        free(option);
+    }
 }
 
 void freeOptionList(OptionList *list)

@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../include/cmdLineParser.h"
 
@@ -24,11 +25,29 @@
     "-c file1[,file2],      lista di file da rimuovere dal server separati da ','.\n"                                                   \
     "-p,                    abilita le stampe sullo standard output per ogni operazione.\n"
 
+#define FREE_AND_EXIT(list, option, status) \
+    freeOption(option);                     \
+    freeOptionList(list);                   \
+    exit(status);
+
 #define PRINT_HELP_MSG_AND_EXIT(list, option) \
     printf(HELP_MSG, argv[0]);                \
-    freeOption(option);                       \
-    freeOptionList(list);                     \
-    exit(EXIT_SUCCESS);
+    FREE_AND_EXIT(list, option, EXIT_SUCCESS);
+
+char *copyOptionArg(Option *option)
+{
+    size_t argLength = strlen(option->arg) + 1;
+    char *arg = malloc(sizeof(char) * argLength);
+
+    if (!arg)
+    {
+        perror("arg");
+        return NULL;
+    }
+
+    strncpy(arg, option->arg, argLength);
+    return arg;
+}
 
 int main(int argc, char *argv[])
 {
@@ -45,7 +64,24 @@ int main(int argc, char *argv[])
     {
         PRINT_HELP_MSG_AND_EXIT(list, selectedOption);
     }
+    freeOption(selectedOption);
 
+    char *sockname;
+
+    if (!(selectedOption = getOption(list, 'f')))
+    {
+        fprintf(stderr, "Errore, opzione -f necessaria.\n");
+        FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
+    }
+
+    if (!(sockname = copyOptionArg(selectedOption)))
+    {
+        fprintf(stderr, "Errore copiando il nome del socketfile");
+        FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
+    }
+    freeOption(selectedOption);
+
+    free(sockname);
     freeOptionList(list);
     return 0;
 }
