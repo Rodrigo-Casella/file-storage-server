@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "../include/cmdLineParser.h"
 
@@ -34,19 +35,25 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
-char *copyOptionArg(Option *option)
-{
-    size_t argLength = strlen(option->arg) + 1;
-    char *arg = malloc(sizeof(char) * argLength);
+int errno;
 
-    if (!arg)
+int copyOptionArg(Option *option, char **dest)
+{
+    if (!option)
     {
-        perror("arg");
-        return NULL;
+        fprintf(stderr, "Errore, option e' NULL.\n");
+        return -1;
     }
 
-    strncpy(arg, option->arg, argLength);
-    return arg;
+    *dest = strdup(option->arg);
+
+    if (!(*dest))
+    {
+        perror("stdup");
+        return -1;
+    }
+    
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -66,7 +73,7 @@ int main(int argc, char *argv[])
     }
     freeOption(selectedOption);
 
-    char *sockname;
+    char *sockname = NULL;
 
     if (!(selectedOption = getOption(list, 'f')))
     {
@@ -74,7 +81,7 @@ int main(int argc, char *argv[])
         FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
     }
 
-    if (!(sockname = copyOptionArg(selectedOption)))
+    if (copyOptionArg(selectedOption, &sockname))
     {
         fprintf(stderr, "Errore copiando il nome del socketfile");
         FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
