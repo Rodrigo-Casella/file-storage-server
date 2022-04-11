@@ -99,21 +99,17 @@ int main(int argc, char *argv[])
     freeOption(selectedOption);
 
     struct timespec requestInterval;
-    SET_TIMESPEC_MILLISECONDS(requestInterval, 0); // 0 valore di default
+    long msec = 0; // valore di default
 
     if ((selectedOption = getOption(list, 't')))
     {
-        long msec = 0;
         if (isNumber(selectedOption->arg, &msec))
         {
             INVALID_ARGUMENT(selectedOption->opt, selectedOption->arg);
         }
-        else
-        {
-            SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
-        }
         freeOption(selectedOption);
     }
+    SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
 
     int print = 0;
     if ((selectedOption = getOption(list, 'p')))
