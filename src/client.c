@@ -110,13 +110,13 @@ int main(int argc, char *argv[])
             long msec;
             if (isNumber(timeInterval, &msec))
             {
-                if (!errno)
-                    perror("isNumber");
-
-                fprintf(stderr, "Errore, l'argomento passato %s non è un numero valido. Verra' usato il valore predefinito.\n", timeInterval);
+                fprintf(stderr, "Errore: opzione -t l'argomento passato '%s' non è un numero valido. Verra' usato il valore predefinito.\n", timeInterval);
+            }
+            else
+            {
+                SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
             }
             free(timeInterval);
-            SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
         }
         freeOption(selectedOption);
     }
