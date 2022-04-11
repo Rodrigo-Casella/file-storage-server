@@ -40,9 +40,12 @@
 
 #define SET_TIMESPEC_MILLISECONDS(timespec, msec)           \
     int sec = (int)msec / 1000;                             \
-    long nanosec = (long)((msec - (sec * 1000) )* 1000000); \
+    long nanosec = (long)((msec - (sec * 1000)) * 1000000); \
     timespec.tv_sec = sec;                                  \
     timespec.tv_nsec = nanosec;
+
+#define INVALID_ARGUMENT(option, arg) \
+    fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg);
 
 int copyOptionArg(Option *option, char **dest)
 {
@@ -100,23 +103,14 @@ int main(int argc, char *argv[])
 
     if ((selectedOption = getOption(list, 't')))
     {
-        char *timeInterval = NULL;
-        if (copyOptionArg(selectedOption, &timeInterval))
+        long msec = 0;
+        if (isNumber(selectedOption->arg, &msec))
         {
-            fprintf(stderr, "Errore copiando tempo di intervallo fra richieste. Verra' usato il valore predefinito.\n");
+            INVALID_ARGUMENT(selectedOption->opt, selectedOption->arg);
         }
         else
         {
-            long msec;
-            if (isNumber(timeInterval, &msec))
-            {
-                fprintf(stderr, "Errore: opzione -t l'argomento passato '%s' non è un numero valido. Verra' usato il valore predefinito.\n", timeInterval);
-            }
-            else
-            {
-                SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
-            }
-            free(timeInterval);
+            SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
         }
         freeOption(selectedOption);
     }
