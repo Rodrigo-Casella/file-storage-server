@@ -115,6 +115,14 @@ int main(int argc, char *argv[])
         freeOption(selectedOption);
     }
 
+    int print = 0;
+    if ((selectedOption = getOption(list, 'p')))
+    {
+        puts("Prints enables");
+        print = 1;
+        freeOption(selectedOption);
+    }
+
     free(sockname);
     freeOptionList(list);
     return 0;
