@@ -2,8 +2,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
+#include <math.h>
 
 #include "../include/cmdLineParser.h"
+#include "../include/utils.h"
 
 #define HELP_MSG                                                                                                                        \
     "Uso: %s -f <socketfile> [OPTIONS]\n"                                                                                               \
@@ -35,7 +38,11 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
-int errno;
+#define SET_TIMESPEC_MILLISECONDS(timespec, msec)           \
+    int sec = (int)msec / 1000;                             \
+    long nanosec = (long)((msec - (sec * 1000) )* 1000000); \
+    timespec.tv_sec = sec;                                  \
+    timespec.tv_nsec = nanosec;
 
 int copyOptionArg(Option *option, char **dest)
 {
@@ -52,7 +59,7 @@ int copyOptionArg(Option *option, char **dest)
         perror("stdup");
         return -1;
     }
-    
+
     return 0;
 }
 
@@ -87,6 +94,32 @@ int main(int argc, char *argv[])
         FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
     }
     freeOption(selectedOption);
+
+    struct timespec requestInterval;
+    SET_TIMESPEC_MILLISECONDS(requestInterval, 0); // 0 valore di default
+
+    if ((selectedOption = getOption(list, 't')))
+    {
+        char *timeInterval = NULL;
+        if (copyOptionArg(selectedOption, &timeInterval))
+        {
+            fprintf(stderr, "Errore copiando tempo di intervallo fra richieste. Verra' usato il valore predefinito.\n");
+        }
+        else
+        {
+            long msec;
+            if (isNumber(timeInterval, &msec))
+            {
+                if (!errno)
+                    perror("isNumber");
+
+                fprintf(stderr, "Errore, l'argomento passato %s non è un numero valido. Verra' usato il valore predefinito.\n", timeInterval);
+            }
+            free(timeInterval);
+            SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
+        }
+        freeOption(selectedOption);
+    }
 
     free(sockname);
     freeOptionList(list);
