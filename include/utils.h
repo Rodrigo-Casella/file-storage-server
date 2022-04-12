@@ -5,6 +5,13 @@
 #include <errno.h>
 #include <stdlib.h>
 
+#define SYSCALL_EQ_RETURN(syscall, val) \
+    if (syscall == val)                 \
+    {                                   \
+        perror(#syscall);               \
+        return -1;                      \
+    }
+
 static inline int isNumber(const char *s, long *n)
 {
     if (s == NULL)
