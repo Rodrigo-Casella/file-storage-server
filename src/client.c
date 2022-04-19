@@ -221,6 +221,7 @@ int main(int argc, char *argv[])
         switch (selectedOption->opt)
         {
         case 'w':
+	    ;
             char *dirname = NULL, *nFiles = NULL;
             GET_N_ARGS(selectedOption->arg, ",", &dirname, &nFiles);
 
