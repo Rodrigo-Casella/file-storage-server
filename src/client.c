@@ -43,10 +43,15 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
-#define SET_TIMESPEC_MILLISECONDS(timespec, msec)           \
-    int sec = (int)msec / 1000;                             \
-    long nanosec = (long)((msec - (sec * 1000)) * 1000000); \
-    timespec.tv_sec = sec;                                  \
+#define SET_TIMESPEC_MILLISECONDS(timespec, msec)                                        \
+    int sec = (int)msec / 1000;                                                          \
+    long nanosec = (long)((msec - (sec * 1000)) * 1000000);                              \
+    if (nanosec > 999999999)                                                             \
+    {                                                                                    \
+        fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n"); \
+        sec = 0, nanosec = 0;                                                            \
+    }                                                                                    \
+    timespec.tv_sec = sec;                                                               \
     timespec.tv_nsec = nanosec;
 
 #define ERROR_ARG_COPY(option, arg) \
@@ -55,20 +60,31 @@
 #define INVALID_ARGUMENT(option, arg) \
     fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg);
 
-#define GET_N_ARGS(args, arg, n)               \
-    char *token, *savePtr;                     \
-    token = strtok_r(arg, ",", &savePtr);      \
-    int i = 0;                                 \
-    while (token)                              \
-    {                                          \
-        args[i++] = strdup(token);             \
-        token = strtok_r(NULL, ",", &savePtr); \
+#define GET_N_ARGS(arg, del, ...)                           \
+    if (1)                                                  \
+    {                                                       \
+        char *token, *savePtr;                              \
+        char **ptrArr[] = {__VA_ARGS__};                    \
+        int arr_length = 0;                                 \
+        ARRAY_LENGTH(*ptrArr, arr_length);                  \
+        token = strtok_r(arg, del, &savePtr);               \
+        for (int i = 0; token && i <= arr_length; i++)      \
+        {                                                   \
+            *ptrArr[i] = strndup(token, strlen(token) + 1); \
+            token = strtok_r(NULL, del, &savePtr);          \
+        }                                                   \
     }
 
-#define FREE_N_ARGS(args, n)    \
-    for (int i = 0; i < n; i++) \
-        if (args[i])            \
-            free(args[i]);      \
+#define FREE_N_ARGS(...)                      \
+    if (1)                                    \
+    {                                         \
+        char **ptrArr[] = {__VA_ARGS__};      \
+        int arr_length = 0;                   \
+        ARRAY_LENGTH(*ptrArr, arr_length);    \
+        for (int i = 0; i <= arr_length; i++) \
+            if (*ptrArr[i])                   \
+                free(*ptrArr[i]);             \
+    }
 
 int copyOptionArg(Option *option, char **dest)
 {
@@ -78,11 +94,11 @@ int copyOptionArg(Option *option, char **dest)
         return -1;
     }
 
-    *dest = strdup(option->arg);
+    *dest = strndup(option->arg, strlen(option->arg) + 1);
 
     if (!(*dest))
     {
-        perror("stdup");
+        perror("strndup");
         return -1;
     }
 
@@ -107,7 +123,7 @@ int writeDirOnServer(char const *dirname, long const filesToWrite, int *filesWri
     if (strcmp(cwd, dirname))
         SYSCALL_EQ_RETURN(chdir(dirname), -1);
 
-    //ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
+    // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
     while ((errno = 0, entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
     {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
@@ -188,6 +204,7 @@ int main(int argc, char *argv[])
         freeOption(selectedOption);
     }
     SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
+    nanosleep(&requestInterval, NULL);
 
     int print = 0;
     if ((selectedOption = getOption(list, 'p')))
@@ -204,28 +221,29 @@ int main(int argc, char *argv[])
         switch (selectedOption->opt)
         {
         case 'w':
-            char *args[2] = {NULL, NULL}; // args[0]: dirname, args[1]: numero file da scrivere
-            GET_N_ARGS(args, selectedOption->arg, 2);
+            char *dirname = NULL, *nFiles = NULL;
+            GET_N_ARGS(selectedOption->arg, ",", &dirname, &nFiles);
 
             long filesToWrite = 0;
-            if (args[1] && (isNumber(args[1] + 2, &filesToWrite) || filesToWrite < 0)) // args[1] + 2: salto i caratteri n=
+            if (nFiles && (isNumber(nFiles + 2, &filesToWrite) || filesToWrite < 0)) // nFiles + 2: salto i caratteri n=
             {
                 fprintf(stderr, "Errore nell'input del secondo argomento. Impostando valore di default.\n");
                 filesToWrite = 0;
             }
 
             int filesWritten = 0;
-            if (writeDirOnServer(args[0], filesToWrite, &filesWritten) || filesWritten < 0)
+            if (writeDirOnServer(dirname, filesToWrite, &filesWritten) || filesWritten < 0)
             {
-                fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", args[0]);
+                fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirname);
             }
-            FREE_N_ARGS(args, 2);
+            FREE_N_ARGS(&dirname, &nFiles);
             break;
 
         default:
             fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
             break;
         }
+
         selectedOption = selectedOption->next;
     }
 
