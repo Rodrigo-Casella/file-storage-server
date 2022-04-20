@@ -276,6 +276,15 @@ int main(int argc, char *argv[])
         case 'd':
             fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
             break;
+        case 'l':
+            TOKENIZER(selectedOption->arg, ",", printf("Lock su %s.\n", token));
+            break;
+        case 'u':
+            TOKENIZER(selectedOption->arg, ",", printf("Unlock su %s.\n", token));
+            break;
+        case 'c':
+            TOKENIZER(selectedOption->arg, ",", printf("Elimino file %s.\n", token));
+            break;
         default:
             fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
             break;
