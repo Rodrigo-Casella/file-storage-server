@@ -82,13 +82,14 @@
                 free(*ptrArr[i]);            \
     }
 
-#define CHECK_SAVE_DIR(currentOption, nextOption, saveDir, skip)                                                       \
-    if (selectedOption->next && selectedOption->next->opt == nextOption)                                               \
-        skipOption = 1;                                                                                                \
-    if (skipOption)                                                                                                    \
+#define CHECK_SAVE_DIR(currOption, nextOption, saveDir, skip)                                                       \
+    if (currOption->next && currOption->next->opt == nextOption)                                               \
+        skip = 1;                                                                                                      \
+                                                                                                                       \
+    if (skip)                                                                                                          \
         CHECK_AND_ACTION(copyOptionArg, ==, -1,                                                                        \
-                         fprintf(stderr, "Errore copiando cartella di salvataggio: %s.\n", selectedOption->next->arg); \
-                         , selectedOption->next, &saveDir);
+                         fprintf(stderr, "Errore copiando cartella di salvataggio: %s.\n", currOption->next->arg); \
+                         , currOption->next, &saveDir);
 
 int copyOptionArg(Option *option, char **dest)
 {
@@ -170,15 +171,16 @@ int main(int argc, char *argv[])
 
     Option *selectedOption;
 
-    if ((selectedOption = getOption(list, 'h')))
+    if ((selectedOption = getOption(list, 'h'))) {
         PRINT_HELP_MSG_AND_EXIT(list, selectedOption);
+    }
 
     freeOption(selectedOption);
 
     char *sockname = NULL;
 
-    CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n");
-                         FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
+    // CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"), list, 'f');
+    CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
 
     CHECK_AND_ACTION(copyOptionArg, ==, -1, FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption, &sockname);
 
@@ -213,38 +215,66 @@ int main(int argc, char *argv[])
         switch (selectedOption->opt)
         {
         case 'w':;
-            char *dirToWrite = NULL, *nFiles = NULL;
+            char *dirToWrite = NULL, *nFilesToWrite_string = NULL;
 
             CHECK_SAVE_DIR(selectedOption, 'D', saveDir, skipOption);
 
-            GET_N_ARGS(selectedOption->arg, ",", &dirToWrite, &nFiles);
+            GET_N_ARGS(selectedOption->arg, ",", &dirToWrite, &nFilesToWrite_string);
 
-            long filesToWrite = 0;
-            if (nFiles && (isNumber(nFiles + 2, &filesToWrite) || filesToWrite < 0)) // nFiles + 2: salto i caratteri n=
+            long nFilesToWrite = 0;
+            if (nFilesToWrite_string && (isNumber(nFilesToWrite_string + 2, &nFilesToWrite) || nFilesToWrite < 0)) // nFiles + 2: salto i caratteri n=
             {
                 fprintf(stderr, "Errore nell'input del secondo argomento. Impostando valore di default.\n");
-                filesToWrite = 0;
+                nFilesToWrite = 0;
             }
 
             int filesWritten = 0;
-            if (writeDirOnServer(dirToWrite, saveDir, filesToWrite, &filesWritten) || filesWritten < 0)
+            if (writeDirOnServer(dirToWrite, saveDir, nFilesToWrite, &filesWritten) || filesWritten < 0)
                 fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
 
-            FREE_N_ARGS(&dirToWrite, &nFiles, &saveDir);
+            FREE_N_ARGS(&dirToWrite, &nFilesToWrite_string, &saveDir);
             break;
         case 'W':;
-            char *files = NULL;
+            char *filesToWrite = NULL;
             CHECK_SAVE_DIR(selectedOption, 'D', saveDir, skipOption);
-            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &files);
+            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &filesToWrite);
 
-            TOKENIZER(files, ",", char path[PATH_MAX];
+            TOKENIZER(filesToWrite, ",", char path[PATH_MAX];
                       SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non è stato possibile risolvere il path di %s.\n", token); continue, token, path);
                       printf("scrivendo: %s\n", path);)
 
-            FREE_N_ARGS(&files, &saveDir);
+            FREE_N_ARGS(&filesToWrite, &saveDir);
             break;
         case 'D':
             fprintf(stderr, "Errore, l'opzione -D va usata congiuntamente a -w o -W.\n");
+            break;
+        case 'r':;
+            char *filesToRead = NULL;
+            CHECK_SAVE_DIR(selectedOption, 'd', saveDir, skipOption);
+            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &filesToRead);
+
+            TOKENIZER(filesToRead, ",", printf("leggendo: %s\n", token))
+
+            FREE_N_ARGS(&filesToRead, &saveDir);
+            break;
+        case 'R':;
+            char *nFilesToRead_string = NULL;
+            CHECK_SAVE_DIR(selectedOption, 'd', saveDir, skipOption);
+
+            GET_N_ARGS(selectedOption->arg, ",", &nFilesToRead_string);
+
+            long nFilesToRead = 0;
+            if (nFilesToRead_string && (isNumber(nFilesToRead_string + 2, &nFilesToRead) || nFilesToRead < 0)) // nFiles + 2: salto i caratteri n=
+            {
+                fprintf(stderr, "Errore nell'input del secondo argomento. Impostando valore di default.\n");
+                nFilesToRead = 0;
+            }
+            printf("Leggo %ld casuali dal files dal server.\n", nFilesToRead);
+
+            FREE_N_ARGS(&nFilesToRead_string);
+            break;
+        case 'd':
+            fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
             break;
         default:
             fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
