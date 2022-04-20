@@ -16,6 +16,39 @@
         return -1;                      \
     }
 
+#define SYSCALL_EQ_ACTION(syscall, val, action, ...) \
+    if (syscall(__VA_ARGS__) == val)                 \
+    {                                                \
+        perror(#syscall);                            \
+        action;                                      \
+    }
+
+#define CHECK_AND_ACTION(func, op, val, action, ...) \
+    if (func(__VA_ARGS__) op val)                    \
+    {                                                \
+        fprintf(stderr, "Errore in %s.\n", #func);   \
+        action;                                      \
+    }
+
+#define CHECK_RET_AND_ACTION(func, op, val, retval, action, ...) \
+    if ((retval = func(__VA_ARGS__)) op val)                     \
+    {                                                            \
+        fprintf(stderr, "Errore in %s.\n", #func);               \
+        action;                                                  \
+    }
+
+#define FOR_ACTION(condition, action) \
+    for (condition)                   \
+    {                                 \
+        action;                       \
+    }
+
+#define TOKENIZER(string, del, action)                                                                                     \
+    if (1)                                                                                                                 \
+    {                                                                                                                      \
+        char *save_ptr;                                                                                                    \
+        FOR_ACTION(char *token = strtok_r(string, del, &save_ptr); token; token = strtok_r(NULL, del, &save_ptr), action); \
+    }
 static inline int isNumber(const char *s, long *n)
 {
     if (s == NULL)

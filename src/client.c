@@ -54,9 +54,6 @@
     timespec.tv_sec = sec;                                                               \
     timespec.tv_nsec = nanosec;
 
-#define ERROR_ARG_COPY(option, arg) \
-    fprintf(stderr, "Errore copiando l'argomento '%s' di -%c.\n", arg, option);
-
 #define INVALID_ARGUMENT(option, arg) \
     fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg);
 
@@ -179,17 +176,11 @@ int main(int argc, char *argv[])
 
     char *sockname = NULL;
 
-    if (!(selectedOption = getOption(list, 'f')))
-    {
-        fprintf(stderr, "Errore, opzione -f necessaria.\n");
-        FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
-    }
+    CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n");
+                         FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
 
-    if (copyOptionArg(selectedOption, &sockname))
-    {
-        ERROR_ARG_COPY(selectedOption->opt, selectedOption->arg);
-        FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE);
-    }
+    CHECK_AND_ACTION(copyOptionArg, ==, -1, FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption, &sockname);
+
     freeOption(selectedOption);
 
     struct timespec requestInterval;
@@ -204,7 +195,6 @@ int main(int argc, char *argv[])
         freeOption(selectedOption);
     }
     SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
-    nanosleep(&requestInterval, NULL);
 
     int print = 0;
     if ((selectedOption = getOption(list, 'p')))
@@ -220,8 +210,7 @@ int main(int argc, char *argv[])
     {
         switch (selectedOption->opt)
         {
-        case 'w':
-	    ;
+        case 'w':;
             char *dirname = NULL, *nFiles = NULL;
             GET_N_ARGS(selectedOption->arg, ",", &dirname, &nFiles);
 
@@ -239,12 +228,22 @@ int main(int argc, char *argv[])
             }
             FREE_N_ARGS(&dirname, &nFiles);
             break;
+        case 'W':;
+            char *files = NULL;
+            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &files);
 
+            TOKENIZER(files, ",", char path[PATH_MAX];
+                      SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non è stato possibile risolvere il path di %s.\n", token); continue, token, path);
+                      printf("scrivendo: %s\n", path);)
+
+            free(files);
+            break;
         default:
             fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
             break;
         }
 
+        nanosleep(&requestInterval, NULL);
         selectedOption = selectedOption->next;
     }
 
