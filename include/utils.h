@@ -5,9 +5,9 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#define ARRAY_LENGTH(arr, arr_length)                                                                  \
-    arr_length = sizeof(*ptrArr);     /* spezzo in due la divisione per eviatre -Wsizeof-pointer-div*/ \
-    arr_length /= sizeof(*ptrArr[0]); /*non e'propriamente POSIX conforme, ma per questa volta può andare bene*/
+#define ARRAY_LENGTH(arr, arr_length)                                                                 \
+    arr_length = sizeof(ptrArr);     /* spezzo in due la divisione per eviatre -Wsizeof-pointer-div*/ \
+    arr_length /= sizeof(ptrArr[0]); /*non e'propriamente POSIX conforme, ma per questa volta può andare bene*/
 
 #define SYSCALL_EQ_RETURN(syscall, val, ...) \
     if (syscall(__VA_ARGS__) == val)         \
