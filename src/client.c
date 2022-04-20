@@ -107,18 +107,13 @@ int writeDirOnServer(char const *dirname, long const filesToWrite, int *filesWri
     DIR *dir;
     struct dirent *entry;
 
-    if (!(dir = opendir(dirname)))
-    {
-        perror("opendir");
-        fprintf(stderr, "Errore aprendo directory: %s.\n", dirname);
-        return -1;
-    }
+    SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, fprintf(stderr, "Errore aprendo directory: %s.\n", dirname); return -1, dirname);
 
     char cwd[PATH_MAX];
-    SYSCALL_EQ_RETURN(getcwd(cwd, PATH_MAX), NULL);
+    SYSCALL_EQ_RETURN(getcwd, NULL, cwd, PATH_MAX);
 
     if (strcmp(cwd, dirname))
-        SYSCALL_EQ_RETURN(chdir(dirname), -1);
+        SYSCALL_EQ_RETURN(chdir, -1, dirname);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
     while ((errno = 0, entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
@@ -133,14 +128,14 @@ int writeDirOnServer(char const *dirname, long const filesToWrite, int *filesWri
 
         if (S_ISDIR(info.st_mode))
         {
-            SYSCALL_EQ_RETURN(chdir(entry->d_name), -1);
+            SYSCALL_EQ_RETURN(chdir, -1, entry->d_name);
             writeDirOnServer(".", filesToWrite, filesWritten);
-            SYSCALL_EQ_RETURN(chdir(cwd), -1);
+            SYSCALL_EQ_RETURN(chdir, -1, cwd);
         }
         else
         {
             char path[PATH_MAX];
-            SYSCALL_EQ_RETURN(realpath(entry->d_name, path), NULL);
+            SYSCALL_EQ_RETURN(realpath, NULL, entry->d_name, path);
             printf("scrivendo: %s\n", path);
             (*filesWritten)++;
         }
@@ -148,11 +143,11 @@ int writeDirOnServer(char const *dirname, long const filesToWrite, int *filesWri
     if (errno)
     {
         perror("readdir");
-        SYSCALL_EQ_RETURN(closedir(dir), -1);
+        SYSCALL_EQ_RETURN(closedir, -1, dir);
         return -1;
     }
 
-    SYSCALL_EQ_RETURN(closedir(dir), -1);
+    SYSCALL_EQ_RETURN(closedir, -1, dir);
     return 0;
 }
 

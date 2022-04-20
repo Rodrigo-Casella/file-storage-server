@@ -9,11 +9,11 @@
     arr_length = sizeof(*ptrArr);     /* spezzo in due la divisione per eviatre -Wsizeof-pointer-div*/ \
     arr_length /= sizeof(*ptrArr[0]); /*non e'propriamente POSIX conforme, ma per questa volta può andare bene*/
 
-#define SYSCALL_EQ_RETURN(syscall, val) \
-    if (syscall == val)                 \
-    {                                   \
-        perror(#syscall);               \
-        return -1;                      \
+#define SYSCALL_EQ_RETURN(syscall, val, ...) \
+    if (syscall(__VA_ARGS__) == val)         \
+    {                                        \
+        perror(#syscall);                    \
+        return -1;                           \
     }
 
 #define SYSCALL_EQ_ACTION(syscall, val, action, ...) \
@@ -21,6 +21,41 @@
     {                                                \
         perror(#syscall);                            \
         action;                                      \
+    }
+
+#define SYSCALL_RET_EQ_ACTION(syscall, val, retval, action, ...) \
+    if ((retval = syscall(__VA_ARGS__)) == val)                  \
+    {                                                            \
+        perror(#syscall);                                        \
+        action;                                                  \
+    }
+
+#define SYSCALL_NEQ_RETURN(syscall, val, ...) \
+    if (syscall(__VA_ARGS__) != val)          \
+    {                                         \
+        perror(#syscall);                     \
+        return -1;                            \
+    }
+
+#define SYSCALL_NEQ_ACTION(syscall, val, action, ...) \
+    if (syscall(__VA_ARGS__) != val)                  \
+    {                                                 \
+        perror(#syscall);                             \
+        action;                                       \
+    }
+
+#define SYSCALL_RET_NEQ_ACTION(syscall, val, retval, action, ...) \
+    if ((retval = syscall(__VA_ARGS__)) != val)                   \
+    {                                                             \
+        perror(#syscall);                                         \
+        action;                                                   \
+    }
+
+#define SYSCALL_OP_ACTION(syscall, op, val, action, ...) \
+    if (syscall(__VA_ARGS__) op val)                     \
+    {                                                    \
+        perror(#syscall);                                \
+        action;                                          \
     }
 
 #define CHECK_AND_ACTION(func, op, val, action, ...) \
@@ -49,6 +84,7 @@
         char *save_ptr;                                                                                                    \
         FOR_ACTION(char *token = strtok_r(string, del, &save_ptr); token; token = strtok_r(NULL, del, &save_ptr), action); \
     }
+
 static inline int isNumber(const char *s, long *n)
 {
     if (s == NULL)
