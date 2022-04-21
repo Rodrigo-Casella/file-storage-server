@@ -17,19 +17,19 @@ all: $(BDIR)/client
 $(BDIR)/client: $(OBJCLIENT) | $(BDIR)
 	$(CC) $(CFLAGS) $^ -o $@
 
-$(BDIR):
-	mkdir -p $(BDIR)
-
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 
 $(ODIR):
 	mkdir -p $(ODIR)
 
-debug:	./clientdb
+debug:	$(BDIR)/clientdb
 
-./clientdb:	$(SRCCLIENT)
+$(BDIR)/clientdb:	$(SRCCLIENT) | $(BDIR)
 	$(CC) -g $^ -o $@  $(CFLAGS)
 
+$(BDIR):
+	mkdir -p $(BDIR)
+
 clean:
-	rm -rf $(ODIR)/ $(BDIR)/ clientdb
+	rm -rf $(ODIR)/ $(BDIR)/

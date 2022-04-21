@@ -1,3 +1,5 @@
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,16 +45,19 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
-#define SET_TIMESPEC_MILLISECONDS(timespec, msec)                                        \
-    int sec = (int)msec / 1000;                                                          \
-    long nanosec = (long)((msec - (sec * 1000)) * 1000000);                              \
-    if (nanosec > 999999999)                                                             \
-    {                                                                                    \
-        fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n"); \
-        sec = 0, nanosec = 0;                                                            \
-    }                                                                                    \
-    timespec.tv_sec = sec;                                                               \
-    timespec.tv_nsec = nanosec;
+#define SET_TIMESPEC_MILLISECONDS(timespec, msec)                                            \
+    if (1)                                                                                   \
+    {                                                                                        \
+        int sec = (int)msec / 1000;                                                          \
+        long nanosec = (long)((msec - (sec * 1000)) * 1000000);                              \
+        if (nanosec > 999999999)                                                             \
+        {                                                                                    \
+            fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n"); \
+            sec = 0, nanosec = 0;                                                            \
+        }                                                                                    \
+        timespec.tv_sec = sec;                                                               \
+        timespec.tv_nsec = nanosec;                                                          \
+    }
 
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
 
@@ -82,46 +87,46 @@
                 free(*ptrArr[i]);            \
     }
 
-#define CHECK_SAVE_DIR(currOption, nextOption, saveDir, skip)                                                       \
-    if (currOption->next && currOption->next->opt == nextOption)                                               \
-        skip = 1;                                                                                                      \
-                                                                                                                       \
-    if (skip)                                                                                                          \
-        CHECK_AND_ACTION(copyOptionArg, ==, -1,                                                                        \
-                         fprintf(stderr, "Errore copiando cartella di salvataggio: %s.\n", currOption->next->arg); \
-                         , currOption->next, &saveDir);
+#define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir)                         \
+    if (nextOption && nextOption->opt == d_or_D)                            \
+        skipOption = 1;                                                     \
+                                                                            \
+    if (skipOption)                                                         \
+        CHECK_RET_AND_ACTION(strndup, ==, NULL, saveDir, perror("strndup"), \
+                             nextOption->arg, strlen(nextOption->arg) + 1);
 
-int copyOptionArg(Option *option, char **dest)
+#define CHECK_IS_NUMBER(num_string, num)                                                                           \
+    if (num_string && ((isNumber(num_string + 2, &num) != 0) || num < 0)) /* nFiles + 2: salto i caratteri n=*/    \
+    {                                                                                                              \
+        fprintf(stderr, "Errore: %s non e' un numero o e' negativo. Impostando valore di default.\n", num_string); \
+        num = 0;                                                                                                   \
+    }
+
+int writeFileHandler(char *file_path)
 {
-    if (!option)
-    {
-        fprintf(stderr, "Errore, option e' NULL.\n");
-        return -1;
-    }
-
-    *dest = strndup(option->arg, strlen(option->arg) + 1);
-
-    if (!(*dest))
-    {
-        perror("strndup");
-        return -1;
-    }
-
+    char resolved_path[PATH_MAX];
+    SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
+    printf("scrivendo: %s\n", resolved_path);
     return 0;
 }
 
-int writeDirOnServer(char const *dirToWrite, char const *dirToSave, long const filesToWrite, int *filesWritten)
+int readFileHandler(char *file)
+{
+    printf("leggendo: %s\n", file);
+    return 0;
+}
+
+int writeDirHandler(char const *dirToWrite, char const *dirToSave, long const filesToWrite, int *filesWritten)
 {
     DIR *dir;
     struct dirent *entry;
 
-    SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, fprintf(stderr, "Errore aprendo directory: %s.\n", dirToWrite); return -1, dirToWrite);
-
     char cwd[PATH_MAX];
     SYSCALL_EQ_RETURN(getcwd, NULL, cwd, PATH_MAX);
 
-    if (strcmp(cwd, dirToWrite))
-        SYSCALL_EQ_RETURN(chdir, -1, dirToWrite);
+    SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, fprintf(stderr, "Errore aprendo directory: %s.\n", dirToWrite); return -1, dirToWrite);
+
+    SYSCALL_EQ_RETURN(chdir, -1, dirToWrite);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
     while ((errno = 0, entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
@@ -136,15 +141,11 @@ int writeDirOnServer(char const *dirToWrite, char const *dirToSave, long const f
 
         if (S_ISDIR(info.st_mode))
         {
-            SYSCALL_EQ_RETURN(chdir, -1, entry->d_name);
-            writeDirOnServer(".", dirToSave, filesToWrite, filesWritten);
-            SYSCALL_EQ_RETURN(chdir, -1, cwd);
+            writeDirHandler(entry->d_name, dirToSave, filesToWrite, filesWritten);
         }
         else
         {
-            char path[PATH_MAX];
-            SYSCALL_EQ_RETURN(realpath, NULL, entry->d_name, path);
-            printf("scrivendo: %s\n", path);
+            CHECK_AND_ACTION(writeFileHandler, ==, -1, return -1, entry->d_name);
             (*filesWritten)++;
         }
     }
@@ -154,9 +155,23 @@ int writeDirOnServer(char const *dirToWrite, char const *dirToSave, long const f
         SYSCALL_EQ_RETURN(closedir, -1, dir);
         return -1;
     }
-
     SYSCALL_EQ_RETURN(closedir, -1, dir);
+
+    SYSCALL_EQ_RETURN(chdir, -1, cwd);
     return 0;
+}
+
+void callApiOnToken(char *string, char *const del, int (*apiHandler)(char *))
+{
+    char *token, *savePtr;
+
+    token = strtok_r(string, del, &savePtr);
+
+    while (token != NULL)
+    {
+        apiHandler(token);
+        token = strtok_r(NULL, del, &savePtr);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -171,7 +186,8 @@ int main(int argc, char *argv[])
 
     Option *selectedOption;
 
-    if ((selectedOption = getOption(list, 'h'))) {
+    if ((selectedOption = getOption(list, 'h')))
+    {
         PRINT_HELP_MSG_AND_EXIT(list, selectedOption);
     }
 
@@ -179,10 +195,9 @@ int main(int argc, char *argv[])
 
     char *sockname = NULL;
 
-    // CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"), list, 'f');
     CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
 
-    CHECK_AND_ACTION(copyOptionArg, ==, -1, FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption, &sockname);
+    CHECK_RET_AND_ACTION(strndup, ==, NULL, sockname, FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption->arg, strlen(selectedOption->arg) + 1);
 
     freeOption(selectedOption);
 
@@ -208,70 +223,60 @@ int main(int argc, char *argv[])
 
     selectedOption = list->head;
     int skipOption = 0;
-    char *saveDir = NULL;
 
+    printf("Connecting to %s\n", sockname);
     while (selectedOption)
     {
+        char *nFiles_string = NULL, *saveDir = NULL;
+        long nFiles = 0;
+
         switch (selectedOption->opt)
         {
         case 'w':;
-            char *dirToWrite = NULL, *nFilesToWrite_string = NULL;
+            CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
-            CHECK_SAVE_DIR(selectedOption, 'D', saveDir, skipOption);
+            char *dirToWrite = NULL;
 
-            GET_N_ARGS(selectedOption->arg, ",", &dirToWrite, &nFilesToWrite_string);
+            GET_N_ARGS(selectedOption->arg, ",", &dirToWrite, &nFiles_string);
 
-            long nFilesToWrite = 0;
-            if (nFilesToWrite_string && (isNumber(nFilesToWrite_string + 2, &nFilesToWrite) || nFilesToWrite < 0)) // nFiles + 2: salto i caratteri n=
-            {
-                fprintf(stderr, "Errore nell'input del secondo argomento. Impostando valore di default.\n");
-                nFilesToWrite = 0;
-            }
+            CHECK_IS_NUMBER(nFiles_string, nFiles);
 
             int filesWritten = 0;
-            if (writeDirOnServer(dirToWrite, saveDir, nFilesToWrite, &filesWritten) || filesWritten < 0)
+
+            if (writeDirHandler(dirToWrite, saveDir, nFiles, &filesWritten) || filesWritten <= 0)
                 fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
 
-            FREE_N_ARGS(&dirToWrite, &nFilesToWrite_string, &saveDir);
+            FREE_N_ARGS(&saveDir, &dirToWrite, &nFiles_string);
             break;
         case 'W':;
-            char *filesToWrite = NULL;
-            CHECK_SAVE_DIR(selectedOption, 'D', saveDir, skipOption);
-            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &filesToWrite);
+            CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
-            TOKENIZER(filesToWrite, ",", char path[PATH_MAX];
-                      SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non è stato possibile risolvere il path di %s.\n", token); continue, token, path);
-                      printf("scrivendo: %s\n", path);)
+            callApiOnToken(selectedOption->arg, ",", writeFileHandler);
 
-            FREE_N_ARGS(&filesToWrite, &saveDir);
+            if (saveDir)
+                free(saveDir);
             break;
         case 'D':
             fprintf(stderr, "Errore, l'opzione -D va usata congiuntamente a -w o -W.\n");
             break;
         case 'r':;
-            char *filesToRead = NULL;
-            CHECK_SAVE_DIR(selectedOption, 'd', saveDir, skipOption);
-            CHECK_AND_ACTION(copyOptionArg, ==, -1, break, selectedOption, &filesToRead);
+            CHECK_SAVE_DIR(selectedOption->next, 'd', saveDir);
 
-            TOKENIZER(filesToRead, ",", printf("leggendo: %s\n", token))
+            callApiOnToken(selectedOption->arg, ",", readFileHandler);
 
-            FREE_N_ARGS(&filesToRead, &saveDir);
+            if (saveDir)
+                free(saveDir);
             break;
         case 'R':;
-            char *nFilesToRead_string = NULL;
-            CHECK_SAVE_DIR(selectedOption, 'd', saveDir, skipOption);
+            CHECK_SAVE_DIR(selectedOption->next, 'd', saveDir);
 
-            GET_N_ARGS(selectedOption->arg, ",", &nFilesToRead_string);
+            CHECK_RET_AND_ACTION(strndup, ==, NULL, nFiles_string, perror("strndup"), selectedOption->arg, strlen(selectedOption->arg) + 1);
 
-            long nFilesToRead = 0;
-            if (nFilesToRead_string && (isNumber(nFilesToRead_string + 2, &nFilesToRead) || nFilesToRead < 0)) // nFiles + 2: salto i caratteri n=
-            {
-                fprintf(stderr, "Errore nell'input del secondo argomento. Impostando valore di default.\n");
-                nFilesToRead = 0;
-            }
-            printf("Leggo %ld casuali dal files dal server.\n", nFilesToRead);
+            CHECK_IS_NUMBER(nFiles_string, nFiles);
 
-            FREE_N_ARGS(&nFilesToRead_string);
+            printf("Leggo %ld casuali dal files dal server.\n", nFiles);
+
+            FREE_N_ARGS(&saveDir, &nFiles_string);
             break;
         case 'd':
             fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
