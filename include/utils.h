@@ -4,6 +4,8 @@
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <time.h>
 
 #define ARRAY_LENGTH(arr, arr_length)                                                                 \
     arr_length = sizeof(ptrArr);     /* spezzo in due la divisione per eviatre -Wsizeof-pointer-div*/ \
@@ -84,6 +86,46 @@
         char *save_ptr;                                                                                                    \
         FOR_ACTION(char *token = strtok_r(string, del, &save_ptr); token; token = strtok_r(NULL, del, &save_ptr), action); \
     }
+
+static inline void dupNTokens(char *string, const char *del, int n, ...)
+{
+    va_list ap;
+    va_start(ap, n);
+    char *token, *savePtr;
+    token = strtok_r(string, del, &savePtr);
+    for (int i = 0; token && i < n; i++)
+    {
+        char **string = va_arg(ap, char **);
+        *string = strndup(token, strlen(token) + 1);
+        token = strtok_r(NULL, del, &savePtr);
+    }
+    va_end(ap);
+}
+
+static inline void freeNargs(int n, ...)
+{
+    va_list ap;
+    va_start(ap, n);
+    for (int i = 0; i < n; i++)
+    {
+        void **arg = va_arg(ap, void **);
+        if (*arg)
+            free(*arg);
+    }
+}
+
+static inline void setTimespecMsec(struct timespec *time, long msec)
+{
+    int sec = (int)msec / 1000;
+    long nanosec = (long)((msec - (sec * 1000)) * 1000000);
+    if (nanosec > 999999999)
+    {
+        fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n");
+        sec = 0, nanosec = 0;
+    }
+    (*time).tv_sec = sec;
+    (*time).tv_nsec = nanosec;
+}
 
 static inline int isNumber(const char *s, long *n)
 {

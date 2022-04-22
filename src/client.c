@@ -45,47 +45,7 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
-#define SET_TIMESPEC_MILLISECONDS(timespec, msec)                                            \
-    if (1)                                                                                   \
-    {                                                                                        \
-        int sec = (int)msec / 1000;                                                          \
-        long nanosec = (long)((msec - (sec * 1000)) * 1000000);                              \
-        if (nanosec > 999999999)                                                             \
-        {                                                                                    \
-            fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n"); \
-            sec = 0, nanosec = 0;                                                            \
-        }                                                                                    \
-        timespec.tv_sec = sec;                                                               \
-        timespec.tv_nsec = nanosec;                                                          \
-    }
-
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
-
-#define GET_N_ARGS(arg, del, ...)                           \
-    if (1)                                                  \
-    {                                                       \
-        char *token, *savePtr;                              \
-        char **ptrArr[] = {__VA_ARGS__};                    \
-        int arr_length = 0;                                 \
-        ARRAY_LENGTH(*ptrArr, arr_length);                  \
-        token = strtok_r(arg, del, &savePtr);               \
-        for (int i = 0; token && i < arr_length; i++)       \
-        {                                                   \
-            *ptrArr[i] = strndup(token, strlen(token) + 1); \
-            token = strtok_r(NULL, del, &savePtr);          \
-        }                                                   \
-    }
-
-#define FREE_N_ARGS(...)                     \
-    if (1)                                   \
-    {                                        \
-        char **ptrArr[] = {__VA_ARGS__};     \
-        int arr_length = 0;                  \
-        ARRAY_LENGTH(*ptrArr, arr_length);   \
-        for (int i = 0; i < arr_length; i++) \
-            if (*ptrArr[i] != NULL)          \
-                free(*ptrArr[i]);            \
-    }
 
 #define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir)                         \
     if (nextOption && nextOption->opt == d_or_D)                            \
@@ -211,7 +171,7 @@ int main(int argc, char *argv[])
 
         freeOption(selectedOption);
     }
-    SET_TIMESPEC_MILLISECONDS(requestInterval, msec);
+    setTimespecMsec(&requestInterval, msec);
 
     int print = 0;
     if ((selectedOption = getOption(list, 'p')))
@@ -237,7 +197,7 @@ int main(int argc, char *argv[])
 
             char *dirToWrite = NULL;
 
-            GET_N_ARGS(selectedOption->arg, ",", &dirToWrite, &nFiles_string);
+            dupNTokens(selectedOption->arg, ",", 2, &dirToWrite, &nFiles_string);
 
             CHECK_IS_NUMBER(nFiles_string, nFiles);
 
@@ -246,7 +206,7 @@ int main(int argc, char *argv[])
             if (writeDirHandler(dirToWrite, saveDir, nFiles, &filesWritten) || filesWritten <= 0)
                 fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
 
-            FREE_N_ARGS(&saveDir, &dirToWrite, &nFiles_string);
+            freeNargs(3, &saveDir, &dirToWrite, &nFiles_string);
             break;
         case 'W':;
             CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
@@ -276,7 +236,7 @@ int main(int argc, char *argv[])
 
             printf("Leggo %ld casuali dal files dal server.\n", nFiles);
 
-            FREE_N_ARGS(&saveDir, &nFiles_string);
+            freeNargs(2, &saveDir, &nFiles_string);
             break;
         case 'd':
             fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
