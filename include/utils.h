@@ -7,9 +7,7 @@
 #include <stdarg.h>
 #include <time.h>
 
-#define ARRAY_LENGTH(arr, arr_length)                                                                 \
-    arr_length = sizeof(ptrArr);     /* spezzo in due la divisione per eviatre -Wsizeof-pointer-div*/ \
-    arr_length /= sizeof(ptrArr[0]); /*non e'propriamente POSIX conforme, ma per questa volta può andare bene*/
+#define UNIX_PATH_MAX 108
 
 #define SYSCALL_EQ_RETURN(syscall, val, ...) \
     if (syscall(__VA_ARGS__) == val)         \
@@ -80,13 +78,18 @@
         action;                       \
     }
 
-#define TOKENIZER(string, del, action)                                                                                     \
-    if (1)                                                                                                                 \
-    {                                                                                                                      \
-        char *save_ptr;                                                                                                    \
-        FOR_ACTION(char *token = strtok_r(string, del, &save_ptr); token; token = strtok_r(NULL, del, &save_ptr), action); \
+#define TOKENIZER(string, del, action)                                \
+    if (1)                                                            \
+    {                                                                 \
+        char *save_ptr;                                               \
+        char *token = strtok_r(string, del, &save_ptr);               \
+        for (; token; token = strtok_r(NULL, del, &save_ptr), action) \
+        {                                                             \
+            action;                                                   \
+        }                                                             \
     }
 
+#define TIME_IS_ZERO(time) (time.tv_sec == 0 && time.tv_nsec == 0)
 static inline void dupNTokens(char *string, const char *del, int n, ...)
 {
     va_list ap;
@@ -116,8 +119,8 @@ static inline void freeNargs(int n, ...)
 
 static inline void setTimespecMsec(struct timespec *time, long msec)
 {
-    int sec = (int)msec / 1000;
-    long nanosec = (long)((msec - (sec * 1000)) * 1000000);
+    int sec = msec / 1000;
+    long nanosec = ((msec % 1000) * 1000000);
     if (nanosec > 999999999)
     {
         fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n");

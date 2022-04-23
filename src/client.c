@@ -1,4 +1,5 @@
-#define _DEFAULT_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 500
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@
 
 #include "../include/cmdLineParser.h"
 #include "../include/utils.h"
+#include "../include/api.h"
 
 #define HELP_MSG                                                                                                                        \
     "Uso: %s -f <socketfile> [OPTIONS]\n"                                                                                               \
@@ -36,6 +38,8 @@
     "-c file1[,file2],      lista di file da rimuovere dal server separati da ','.\n"                                                   \
     "-p,                    abilita le stampe sullo standard output per ogni operazione.\n"
 
+#define RETRY_TIME_MSEC 1000
+#define MAX_RETRY_TIME_SEC 5
 #define FREE_AND_EXIT(list, option, status) \
     freeOption(option);                     \
     freeOptionList(list);                   \
@@ -162,29 +166,33 @@ int main(int argc, char *argv[])
     freeOption(selectedOption);
 
     struct timespec requestInterval;
-    long msec = 0; // valore di default
+    long requestIntervalMsec = 0; // valore di default
 
     if ((selectedOption = getOption(list, 't')))
     {
-        if (isNumber(selectedOption->arg, &msec))
+        if (isNumber(selectedOption->arg, &requestIntervalMsec))
             INVALID_ARGUMENT(selectedOption->opt, selectedOption->arg);
 
         freeOption(selectedOption);
     }
-    setTimespecMsec(&requestInterval, msec);
+    setTimespecMsec(&requestInterval, requestIntervalMsec);
 
-    int print = 0;
     if ((selectedOption = getOption(list, 'p')))
     {
         puts("Prints enables");
-        print = 1;
+        toPrint = 1;
         freeOption(selectedOption);
     }
+
+    int msec = RETRY_TIME_MSEC;
+    struct timespec abstime = { .tv_sec = time(NULL) + MAX_RETRY_TIME_SEC, .tv_nsec = 0};
+
+    printf("Connessione a %s in corso\n", sockname);
+    CHECK_AND_ACTION(openConnection, ==, -1, perror("openConnection");free(sockname);FREE_AND_EXIT(list, NULL, EXIT_FAILURE), sockname, msec, abstime);
 
     selectedOption = list->head;
     int skipOption = 0;
 
-    printf("Connecting to %s\n", sockname);
     while (selectedOption)
     {
         char *nFiles_string = NULL, *saveDir = NULL;
