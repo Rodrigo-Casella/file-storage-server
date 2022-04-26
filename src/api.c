@@ -24,7 +24,6 @@ int openConnection(const char* sockname, int msec, const struct timespec abstime
     
     while (connect(fd_skt, (const struct sockaddr *) &server_addr, sizeof(server_addr)) == -1)
     {
-        printf("fd_skt %d\n", fd_skt);
         if (errno != ENOENT && errno != EAGAIN)
             return -1;
 

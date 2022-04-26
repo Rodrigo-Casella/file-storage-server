@@ -3,10 +3,10 @@ SDIR = ./src
 ODIR = ./obj
 _SRCCLIENT = client.c cmdLineParser.c
 SRCCLIENT = $(addprefix $(SDIR)/, $(_SRCCLIENT))
-_OBJCLIENT = client.o cmdLineParser.o api.o
+_OBJCLIENT = client.o cmdLineParser.o
 OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
-#_OBJAPI = api.o
-#OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
+_OBJAPI = api.o
+OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 BDIR = ./bin
 
 CC = gcc -std=c99 -pedantic
@@ -17,20 +17,18 @@ LDFLAG = -lapi
 
 all: $(BDIR)/client
 
-$(BDIR)/client: $(OBJCLIENT) | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT)
 
-#$(BDIR)/client: $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
-#	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath,$(BDIR) -L$(BDIR) $(LDFLAG) 
+$(BDIR)/client: $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
+	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(BDIR) -L$(BDIR) $(LDFLAG) 
 
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
 
-#$(BDIR)/libapi.so: $(OBJAPI) | $(BDIR)
-#	$(CC) -shared -o $@ $(CFLAGS) $^
+$(BDIR)/libapi.so: $(OBJAPI) | $(BDIR)
+	$(CC) -shared -o $@ $(CFLAGS) $^
 
-#$(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
-#	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
+$(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
+	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
 $(BDIR):
 	mkdir -p $(BDIR)
