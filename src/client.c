@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 500
+#define _XOPEN_SOURCE 700
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,6 +271,7 @@ int main(int argc, char *argv[])
             selectedOption = selectedOption->next;
     }
 
+    CHECK_AND_ACTION(closeConnection, ==, -1, perror("closeConnection"), sockname);
     free(sockname);
     freeOptionList(list);
     return 0;

@@ -1,6 +1,14 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#if _XOPEN_SOURCE <= 700
+#define _XOPEN_SOURCE 700
+#endif
+
+#if _POSIX_C_SOURCE <= 200809L
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -8,6 +16,8 @@
 #include <time.h>
 
 #define UNIX_PATH_MAX 108
+
+#define MAX(a, b) ((a) > (b)) ? (a) : (b)
 
 #define SYSCALL_EQ_RETURN(syscall, val, ...) \
     if (syscall(__VA_ARGS__) == val)         \
@@ -61,14 +71,12 @@
 #define CHECK_AND_ACTION(func, op, val, action, ...) \
     if (func(__VA_ARGS__) op val)                    \
     {                                                \
-        fprintf(stderr, "Errore in %s.\n", #func);   \
         action;                                      \
     }
 
 #define CHECK_RET_AND_ACTION(func, op, val, retval, action, ...) \
     if ((retval = func(__VA_ARGS__)) op val)                     \
     {                                                            \
-        fprintf(stderr, "Errore in %s.\n", #func);               \
         action;                                                  \
     }
 

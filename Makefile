@@ -1,21 +1,28 @@
 VPATH = ./src:./include
 SDIR = ./src
 ODIR = ./obj
+
 _SRCCLIENT = client.c cmdLineParser.c
 SRCCLIENT = $(addprefix $(SDIR)/, $(_SRCCLIENT))
 _OBJCLIENT = client.o cmdLineParser.o
 OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
+
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
+
+_OBJSERVER = server.o
+OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
+
 BDIR = ./bin
 
-CC = gcc -std=c99 -pedantic
+CC = gcc -g -std=c99 -pedantic
+#-D_POSIX_C_SOURCE=200809L
 CFLAGS = -Wall
 LDFLAG = -lapi
 
-.PHONY: all debug clean
+.PHONY: all clean
 
-all: $(BDIR)/client
+all: $(BDIR)/client $(BDIR)/server
 
 
 $(BDIR)/client: $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
@@ -30,16 +37,17 @@ $(BDIR)/libapi.so: $(OBJAPI) | $(BDIR)
 $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
+$(BDIR)/server: $(OBJSERVER) | $(BDIR)
+	$(CC) -o $@ $(CFLAGS) $^ 
+
+$(OBJSERVER): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
+	$(CC) -c -o $@ $(CFLAGS) $<
+
 $(BDIR):
 	mkdir -p $(BDIR)
 
 $(ODIR):
 	mkdir -p $(ODIR)
 
-debug:	$(BDIR)/clientdb
-
-$(BDIR)/clientdb:	$(SRCCLIENT) $(BDIR)/libapi.so | $(BDIR)
-	$(CC) -g $^ -o $@ $(CFLAGS) -Wl,-rpath=$(BDIR) -L$(BDIR) $(LDFLAG)
-
 clean:
-	rm -rf $(ODIR)/ $(BDIR)/
+	rm -rf $(ODIR)/ $(BDIR)/ mysock
