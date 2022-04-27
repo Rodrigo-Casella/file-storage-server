@@ -1,13 +1,13 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#if _XOPEN_SOURCE <= 700
+/*#ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 #endif
 
-#if _POSIX_C_SOURCE <= 200809L
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
-#endif
+#endif*/
 
 #include <string.h>
 #include <errno.h>

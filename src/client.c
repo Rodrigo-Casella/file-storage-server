@@ -1,5 +1,4 @@
-#define _POSIX_C_SOURCE 200809L
-#define _XOPEN_SOURCE 700
+#include "../include/define_source.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +64,8 @@
         fprintf(stderr, "Errore: %s non e' un numero o e' negativo. Impostando valore di default.\n", num_string); \
         num = 0;                                                                                                   \
     }
+
+//char *realpath(const char *path, char *resolved_path);
 
 int writeFileHandler(char *file_path)
 {
