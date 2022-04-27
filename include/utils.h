@@ -1,14 +1,6 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-/*#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L
-#endif*/
-
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -18,6 +10,57 @@
 #define UNIX_PATH_MAX 108
 
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)
+
+#define LOCK(l)                                  \
+    if (pthread_mutex_lock(l) != 0)              \
+    {                                            \
+        fprintf(stderr, "ERRORE FATALE lock\n"); \
+        pthread_exit((void *)EXIT_FAILURE);      \
+    }
+#define UNLOCK(l)                                  \
+    if (pthread_mutex_unlock(l) != 0)              \
+    {                                              \
+        fprintf(stderr, "ERRORE FATALE unlock\n"); \
+        pthread_exit((void *)EXIT_FAILURE);        \
+    }
+#define WAIT(c, l)                               \
+    if (pthread_cond_wait(c, l) != 0)            \
+    {                                            \
+        fprintf(stderr, "ERRORE FATALE wait\n"); \
+        pthread_exit((void *)EXIT_FAILURE);      \
+    }
+
+#define TWAIT(c, l, t)                                                    \
+    {                                                                     \
+        int r = 0;                                                        \
+        if ((r = pthread_cond_timedwait(c, l, t)) != 0 && r != ETIMEDOUT) \
+        {                                                                 \
+            fprintf(stderr, "ERRORE FATALE timed wait\n");                \
+            pthread_exit((void *)EXIT_FAILURE);                           \
+        }                                                                 \
+    }
+#define SIGNAL(c)                                  \
+    if (pthread_cond_signal(c) != 0)               \
+    {                                              \
+        fprintf(stderr, "ERRORE FATALE signal\n"); \
+        pthread_exit((void *)EXIT_FAILURE);        \
+    }
+#define BCAST(c)                                      \
+    if (pthread_cond_broadcast(c) != 0)               \
+    {                                                 \
+        fprintf(stderr, "ERRORE FATALE broadcast\n"); \
+        pthread_exit((void *)EXIT_FAILURE);           \
+    }
+static inline int TRYLOCK(pthread_mutex_t *l)
+{
+    int r = 0;
+    if ((r = pthread_mutex_trylock(l)) != 0 && r != EBUSY)
+    {
+        fprintf(stderr, "ERRORE FATALE unlock\n");
+        pthread_exit((void *)EXIT_FAILURE);
+    }
+    return r;
+}
 
 #define SYSCALL_EQ_RETURN(syscall, val, ...) \
     if (syscall(__VA_ARGS__) == val)         \
@@ -153,6 +196,48 @@ static inline int isNumber(const char *s, long *n)
     {
         *n = val;
         return 0;
+    }
+    return 1;
+}
+
+static inline int readn(long fd, void *buf, size_t size)
+{
+    size_t left = size;
+    int r;
+    char *bufptr = (char *)buf;
+    while (left > 0)
+    {
+        if ((r = read((int)fd, bufptr, left)) == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        if (r == 0)
+            return 0;
+        left -= r;
+        bufptr += r;
+    }
+    return size;
+}
+
+static inline int writen(long fd, void *buf, size_t size)
+{
+    size_t left = size;
+    int r;
+    char *bufptr = (char *)buf;
+    while (left > 0)
+    {
+        if ((r = write((int)fd, bufptr, left)) == -1)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        if (r == 0)
+            return 0;
+        left -= r;
+        bufptr += r;
     }
     return 1;
 }

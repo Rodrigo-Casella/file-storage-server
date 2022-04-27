@@ -1,12 +1,10 @@
-#ifndef DEFINE_SOURCE
-#define DEFINE_SOURCE
+#ifndef DEFINE_SOURCE_H
+#define DEFINE_SOURCE_H
 
-#ifndef _XOPEN_SOURCE
-#define _XOPEN_SOURCE 700
-#endif
-
-#if _XOPEN_SOURCE < 700
-#define _XOPEN_SOURCE 700
+#if !defined(_XOPEN_SOURCE)
+    #define _XOPEN_SOURCE 700
+#elif _XOPEN_SOURCE < 700
+    #define _XOPEN_SOURCE 700
 #endif
 
 #endif
