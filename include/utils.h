@@ -6,8 +6,14 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <time.h>
+#include <pthread.h>
+#include <unistd.h>
+
+#define BUF_SIZE 1024
 
 #define UNIX_PATH_MAX 108
+
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)
 

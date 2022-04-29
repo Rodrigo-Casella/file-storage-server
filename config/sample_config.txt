@@ -1,0 +1,5 @@
+# Ignora le riche che iniziano con '#'
+
+# Oppure le righe vuote
+
+TEST=stringa di test

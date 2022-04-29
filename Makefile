@@ -10,15 +10,14 @@ OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_OBJSERVER = server.o
+_OBJSERVER = server.o configParser.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
 BDIR = ./bin
 
-CC = gcc -g -std=c99 -pedantic
-#-D_POSIX_C_SOURCE=200809L
-CFLAGS = -Wall
-LDFLAG = -lapi
+CC = gcc -g -std=c99 -pedantic -pthread
+CFLAGS = -Wall 
+LDFLAG = -lapi -lpthread
 
 .PHONY: all clean
 
