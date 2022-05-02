@@ -25,7 +25,8 @@ static int readAndAddSetting(char *line, Setting **head)
 
     CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting->value, perror("malloc valore"); return -1, sizeof(char) * token_length);
     strncpy(newSetting->value, token, token_length);
-
+    newSetting->value[token_length] = '\0';
+    
     newSetting->next = *head;
     *head = newSetting;
 
@@ -68,7 +69,8 @@ char *getValue(Setting *settings, const char *key)
     {
         if (strncmp(key, curr->key, strlen(key) + 1) == 0)
         {
-            return curr->value;
+            char *value = strndup (curr->value, strlen(curr->value) + 1);
+            return value;
         }
         curr = curr->next;
     }
@@ -83,14 +85,14 @@ long getNumericValue(Setting *settings, const char *key)
     if (!value)
         return -1;
 
-    long nValue;
+    long nValue = -1;
 
     if (isNumber(value, &nValue) != 0)
     {
         perror("isNumber");
-        return -1;
     }
 
+    free(value);
     return nValue;
 }
 
