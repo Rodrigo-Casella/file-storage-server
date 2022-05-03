@@ -55,6 +55,7 @@ int main(int argc, char const *argv[])
 
     atexit(cleanup);
 
+    // Parso il file di configurazione
     Setting *settings = parseFile(argv[1]);
 
     if (!settings)
@@ -66,25 +67,37 @@ int main(int argc, char const *argv[])
     char *test = NULL;
     printf("Test: %s\n", (test = getValue(settings, "TEST")));
     free(test);
-    
+
     freeSettingList(&settings);
 
+    // Creo la coda per comunicare con i thread worker 
     BQueue_t *client_fd_queue = NULL;
     client_fd_queue = initBQueue(10);
 
-    ThreadArgs *th_args = malloc(sizeof(*th_args)); 
-    th_args->queue = client_fd_queue;
-    
+    // Creo la pipe con cui i thread worker comunicherranno con il manager
+    int workerManagerPipe[2];
+    SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
+    // Ignoro SIGPIPE e imposto l'fd della read end della pipe come non bloccante
+    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
+    SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
+    // Passo i riferimenti alla struttura per gli argomenti dei thread
+    ThreadArgs *th_args = malloc(sizeof(*th_args));
+    th_args->queue = client_fd_queue;
+    th_args->write_end_pipe_fd = workerManagerPipe[1];
+
+    // Alloco i thread specificati e invoco la loro routine
     pthread_t *workers = malloc(sizeof(*workers) * DFL_THREADS);
 
     for (int i = 0; i < DFL_THREADS; i++)
     {
         int err = 0;
-        CHECK_RET_AND_ACTION(pthread_create, !=, 0, err, fprintf(stderr, "pthread_create: %s\n", strerror(err)); exit(EXIT_FAILURE),
-             &workers[i], NULL, &processRequest, (void *)th_args);
+        CHECK_RET_AND_ACTION(pthread_create, !=, 0, err,
+                             fprintf(stderr, "pthread_create: %s\n", strerror(err));
+                             exit(EXIT_FAILURE), &workers[i], NULL, &processRequest, (void *)th_args);
     }
 
+    // Imposto l'handler per la gestione dei segnali SIGINT, SIGQUIT e SIGHUP
     struct sigaction act;
     memset(&act, 0, sizeof(act));
     act.sa_handler = server_shutdown_handler;
@@ -93,33 +106,42 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGQUIT, &act, NULL);
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGHUP, &act, NULL);
 
+    // Imposto l'indirizzo della socket del server
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     strncpy(server_addr.sun_path, DFL_SOCKET, UNIX_PATH_MAX);
     server_addr.sun_family = AF_UNIX;
 
+    // Fd del server e fd più alta per la select
     int listen_fd, fd_max = 0;
 
     fd_set set, rdset;
 
+    // Numero di client attualmente connessi
     int connected_clients = 0;
 
+    // Creo la socket del server
     SYSCALL_RET_EQ_ACTION(socket, -1, listen_fd, exit(EXIT_FAILURE), AF_UNIX, SOCK_STREAM, 0);
 
+    // Calcolo il fd più alto e imposto i set per la select
     fd_max = MAX(fd_max, listen_fd);
     FD_ZERO(&set);
     FD_SET(listen_fd, &set);
 
+    // Lego la socket con l'indirizzo del server e mi metto in ascolto di richieste di connessione
     SYSCALL_EQ_ACTION(bind, -1, exit(EXIT_FAILURE), listen_fd, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     SYSCALL_EQ_ACTION(listen, -1, exit(EXIT_FAILURE), listen_fd, SOMAXCONN);
 
+    // Esco quando ricevo i segnali di terminazione
     while (!hardQuit)
     {
 
+        // ripristino il set dei fd in lettura
         rdset = set;
 
         if (select(fd_max + 1, &rdset, NULL, NULL, NULL) == -1)
         {
+            // Se ricevo un interruzione esco dal ciclo subito se: non ci sono client connessi e ho ricevuto SIGHUP, ho ricevuto SIGINT o SIGQUIT
             if (errno == EINTR)
             {
                 if (connected_clients == 0 && softQuit)
@@ -149,8 +171,25 @@ int main(int argc, char const *argv[])
                     }
                     /*FD_SET(fd_c, &set);
                     fd_max = MAX(fd_max, fd_c);*/
-                    SYSCALL_EQ_ACTION(close, -1, continue, fd_c);
-                    printf("Client %d disconnesso\n", fd_c);
+
+                    int *client_fd = malloc(sizeof(int));
+                    *client_fd = fd_c;
+                    push(client_fd_queue, client_fd);
+
+                    connected_clients++;
+                } 
+                else
+                {
+                    long fd_sent_from_worker;
+                    char buf[4];
+
+                    CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, 4);
+
+                    fd_sent_from_worker = atol(buf);
+
+                    if(fd_sent_from_worker == 0) {
+                        connected_clients--;
+                    }
                 }
             }
         }
@@ -159,20 +198,22 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
 
+    // Mando segnale di terminazione ai thread worker
     for (int i = 0; i < DFL_THREADS; i++)
         push(client_fd_queue, EOS);
 
+    // E attendo la loro effettiva terminazione
     for (size_t i = 0; i < DFL_THREADS; i++)
     {
         int err = 0;
-        CHECK_RET_AND_ACTION(pthread_join, !=, 0, err, fprintf(stderr, "pthread_join: %s\n", strerror(err)); exit(EXIT_FAILURE),
-             workers[i], NULL);
+        CHECK_RET_AND_ACTION(pthread_join, !=, 0, err,
+                             fprintf(stderr, "pthread_join: %s\n", strerror(err));
+                             exit(EXIT_FAILURE), workers[i], NULL);
     }
 
     free(workers);
     free(th_args);
-
     deleteBQueue(client_fd_queue, NULL);
-    
+
     return 0;
 }

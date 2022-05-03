@@ -6,6 +6,7 @@
 typedef struct threadArgs
 {
     BQueue_t *queue;
+    int write_end_pipe_fd;
 } ThreadArgs;
 
 void *processRequest(void *args);
