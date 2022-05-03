@@ -6,68 +6,15 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <time.h>
-#include <pthread.h>
 #include <unistd.h>
 
 #define BUF_SIZE 1024
-
 #define UNIX_PATH_MAX 108
-
 #define EOS (void*)0x1
+
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)
-
-#define LOCK(l)                                  \
-    if (pthread_mutex_lock(l) != 0)              \
-    {                                            \
-        fprintf(stderr, "ERRORE FATALE lock\n"); \
-        pthread_exit((void *)EXIT_FAILURE);      \
-    }
-#define UNLOCK(l)                                  \
-    if (pthread_mutex_unlock(l) != 0)              \
-    {                                              \
-        fprintf(stderr, "ERRORE FATALE unlock\n"); \
-        pthread_exit((void *)EXIT_FAILURE);        \
-    }
-#define WAIT(c, l)                               \
-    if (pthread_cond_wait(c, l) != 0)            \
-    {                                            \
-        fprintf(stderr, "ERRORE FATALE wait\n"); \
-        pthread_exit((void *)EXIT_FAILURE);      \
-    }
-
-#define TWAIT(c, l, t)                                                    \
-    {                                                                     \
-        int r = 0;                                                        \
-        if ((r = pthread_cond_timedwait(c, l, t)) != 0 && r != ETIMEDOUT) \
-        {                                                                 \
-            fprintf(stderr, "ERRORE FATALE timed wait\n");                \
-            pthread_exit((void *)EXIT_FAILURE);                           \
-        }                                                                 \
-    }
-#define SIGNAL(c)                                  \
-    if (pthread_cond_signal(c) != 0)               \
-    {                                              \
-        fprintf(stderr, "ERRORE FATALE signal\n"); \
-        pthread_exit((void *)EXIT_FAILURE);        \
-    }
-#define BCAST(c)                                      \
-    if (pthread_cond_broadcast(c) != 0)               \
-    {                                                 \
-        fprintf(stderr, "ERRORE FATALE broadcast\n"); \
-        pthread_exit((void *)EXIT_FAILURE);           \
-    }
-static inline int TRYLOCK(pthread_mutex_t *l)
-{
-    int r = 0;
-    if ((r = pthread_mutex_trylock(l)) != 0 && r != EBUSY)
-    {
-        fprintf(stderr, "ERRORE FATALE unlock\n");
-        pthread_exit((void *)EXIT_FAILURE);
-    }
-    return r;
-}
 
 #define SYSCALL_EQ_RETURN(syscall, val, ...) \
     if (syscall(__VA_ARGS__) == val)         \

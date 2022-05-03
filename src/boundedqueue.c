@@ -5,7 +5,7 @@
 #include <errno.h>
 #include <stdio.h>
 
-#include "../include/utils.h"
+#include "../include/mutex.h"
 #include "../include/boundedqueue.h"
 
 static inline void LockQueue(BQueue_t *q)          { LOCK(&q->m);   }

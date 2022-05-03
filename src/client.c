@@ -65,7 +65,7 @@
         num = 0;                                                                                                   \
     }
 
-//char *realpath(const char *path, char *resolved_path);
+char *realpath(const char *path, char *resolved_path);
 
 int writeFileHandler(char *file_path)
 {
