@@ -10,14 +10,15 @@ OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_OBJSERVER = server.o configParser.o
+_OBJSERVER = server.o configParser.o worker.o boundedqueue.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
 BDIR = ./bin
 
 CC = gcc -g -std=c99 -pedantic -pthread
-CFLAGS = -Wall 
-LDFLAG = -lapi -lpthread
+CFLAGS = -Wall
+APILIB = -lapi
+LDFLAG = -lpthread
 
 .PHONY: all clean
 
@@ -25,7 +26,7 @@ all: $(BDIR)/client $(BDIR)/server
 
 
 $(BDIR)/client: $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(BDIR) -L$(BDIR) $(LDFLAG) 
+	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(BDIR) -L$(BDIR) $(APILIB) $(LDFLAG) 
 
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
@@ -37,10 +38,10 @@ $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
 $(BDIR)/server: $(OBJSERVER) | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $^ 
+	$(CC) -o $@ $(CFLAGS) $^ $(LDFLAG)
 
 $(OBJSERVER): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
-	$(CC) -c -o $@ $(CFLAGS) $<
+	$(CC) -c -o $@ $(CFLAGS) $< $(LDFLAG)
 
 $(BDIR):
 	mkdir -p $(BDIR)

@@ -25,7 +25,6 @@ static int readAndAddSetting(char *line, Setting **head)
 
     CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting->value, perror("malloc valore"); return -1, sizeof(char) * token_length);
     strncpy(newSetting->value, token, token_length);
-    newSetting->value[token_length] = '\0';
     
     newSetting->next = *head;
     *head = newSetting;
@@ -48,6 +47,7 @@ Setting *parseFile(const char *path)
         if (strncmp(buf, "#", 1) == 0 || strncmp(buf, "\n", 1) == 0)
             continue;
 
+        buf[strcspn(buf, "\n")] = '\0';
         readAndAddSetting(buf, &settings);
     }
     if (feof(fp) == 0)

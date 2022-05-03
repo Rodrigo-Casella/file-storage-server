@@ -13,6 +13,7 @@
 
 #define UNIX_PATH_MAX 108
 
+#define EOS (void*)0x1
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #define MAX(a, b) ((a) > (b)) ? (a) : (b)

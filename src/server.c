@@ -1,6 +1,8 @@
 #include "../include/define_source.h"
 
 #include <assert.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -12,8 +14,11 @@
 
 #include "../include/utils.h"
 #include "../include/configParser.h"
+#include "../include/boundedqueue.h"
+#include "../include/worker.h"
 
 #define DFL_SOCKET "./mysock"
+#define DFL_THREADS 2
 #define DFL_BACKLOG 50
 
 int hardQuit = 0, softQuit = 0;
@@ -58,9 +63,27 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    printf("Test: %s\n", getValue(settings, "TEST"));
-
+    char *test = NULL;
+    printf("Test: %s\n", (test = getValue(settings, "TEST")));
+    free(test);
+    
     freeSettingList(&settings);
+
+    BQueue_t *client_fd_queue = NULL;
+    client_fd_queue = initBQueue(10);
+
+    ThreadArgs *th_args = malloc(sizeof(*th_args)); 
+    th_args->queue = client_fd_queue;
+    
+
+    pthread_t *workers = malloc(sizeof(*workers) * DFL_THREADS);
+
+    for (int i = 0; i < DFL_THREADS; i++)
+    {
+        int err = 0;
+        CHECK_RET_AND_ACTION(pthread_create, !=, 0, err, fprintf(stderr, "pthread_create: %s\n", strerror(err)); exit(EXIT_FAILURE),
+             &workers[i], NULL, &processRequest, (void *)th_args);
+    }
 
     struct sigaction act;
     memset(&act, 0, sizeof(act));
@@ -135,5 +158,21 @@ int main(int argc, char const *argv[])
 
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
+
+    for (int i = 0; i < DFL_THREADS; i++)
+        push(client_fd_queue, EOS);
+
+    for (size_t i = 0; i < DFL_THREADS; i++)
+    {
+        int err = 0;
+        CHECK_RET_AND_ACTION(pthread_join, !=, 0, err, fprintf(stderr, "pthread_join: %s\n", strerror(err)); exit(EXIT_FAILURE),
+             workers[i], NULL);
+    }
+
+    free(workers);
+    free(th_args);
+
+    deleteBQueue(client_fd_queue, NULL);
+    
     return 0;
 }
