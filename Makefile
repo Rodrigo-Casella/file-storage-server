@@ -10,7 +10,7 @@ OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_OBJSERVER = server.o configParser.o worker.o boundedqueue.o
+_OBJSERVER = server.o configParser.o worker.o boundedqueue.o filesystem.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
 BDIR = ./bin

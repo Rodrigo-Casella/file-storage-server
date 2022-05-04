@@ -6,6 +6,24 @@
 #include <stdlib.h>
 #include <pthread.h>
 
+#define WRITE_LOCK(l)                              \
+    if (pthread_rwlock_wrlock(l) != 0)             \
+    {                                              \
+        fprintf(stderr, "ERRORE FATALE wrlock\n"); \
+        pthread_exit((void *)EXIT_FAILURE);        \
+    }
+#define READ_LOCK(l)                               \
+    if (pthread_rwlock_rdlock(l) != 0)             \
+    {                                              \
+        fprintf(stderr, "ERRORE FATALE rdlock\n"); \
+        pthread_exit((void *)EXIT_FAILURE);        \
+    }
+#define RW_UNLOCK(l)                                      \
+    if (pthread_rwlock_unlock(l) != 0)                    \
+    {                                                     \
+        fprintf(stderr, "ERRORE FATALE rwlock_unlock\n"); \
+        pthread_exit((void *)EXIT_FAILURE);               \
+    }
 #define LOCK(l)                                  \
     if (pthread_mutex_lock(l) != 0)              \
     {                                            \

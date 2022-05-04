@@ -16,12 +16,13 @@
 #include "../include/configParser.h"
 #include "../include/boundedqueue.h"
 #include "../include/worker.h"
+#include "../include/filesystem.h"
 
 #define DFL_SOCKET "./mysock"
 #define DFL_THREADS 2
 #define DFL_BACKLOG 50
 
-int hardQuit = 0, softQuit = 0;
+int hardQuit, softQuit;
 
 int updatemax(fd_set set, int fdmax)
 {
@@ -81,10 +82,15 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
     SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
+    // Inizializzo il filesystem
+    Filesystem *fs = NULL;
+    fs = initFileSystem(100, 10000);
+
     // Passo i riferimenti alla struttura per gli argomenti dei thread
     ThreadArgs *th_args = malloc(sizeof(*th_args));
     th_args->queue = client_fd_queue;
     th_args->write_end_pipe_fd = workerManagerPipe[1];
+    th_args->fs = fs;
 
     // Alloco i thread specificati e invoco la loro routine
     pthread_t *workers = malloc(sizeof(*workers) * DFL_THREADS);
@@ -133,6 +139,7 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(listen, -1, exit(EXIT_FAILURE), listen_fd, SOMAXCONN);
 
     // Esco quando ricevo i segnali di terminazione
+    hardQuit = 0, softQuit = 0;
     while (!hardQuit)
     {
 
@@ -197,7 +204,6 @@ int main(int argc, char const *argv[])
 
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
-
     // Mando segnale di terminazione ai thread worker
     for (int i = 0; i < DFL_THREADS; i++)
         push(client_fd_queue, EOS);
@@ -214,6 +220,8 @@ int main(int argc, char const *argv[])
     free(workers);
     free(th_args);
     deleteBQueue(client_fd_queue, NULL);
-
+    //stampo i contenuti del filesystem e lo elimino
+    printFileSystem(fs);
+    deleteFileSystem(&fs);
     return 0;
 }
