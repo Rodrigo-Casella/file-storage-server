@@ -12,53 +12,27 @@
 
 static File *initFile(const char *path)
 {
-    File *newFile = NULL;
+    File *newFile;
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFile, perror("calloc"); return NULL, 1, sizeof(File));
 
-    newFile->path = NULL;
     CHECK_RET_AND_ACTION(strndup, ==, NULL, newFile->path, perror("strndup"); return NULL, path, strlen(path) + 1);
-
-    newFile->data = NULL;
-    newFile->dataSize = 0;
-    newFile->insertionTime = time(NULL);
-
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_rwlock_init, !=, 0, errnum,
-                         fprintf(stderr, "pthread_rwlock_init: %s", strerror(errnum));
-                         return NULL, &(newFile->rwlock), NULL);
 
     return newFile;
 }
 
-static void deleteFile(File *file)
+static void deleteFile(void* file)
 {
-    if (file->path)
-        free(file->path);
-    if (file->data)
-        free(file->data);
+    File *tmp = (File *) file;
 
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_rwlock_destroy, !=, 0, errnum, fprintf(stderr, "pthread_rwlock_destroy: %s", strerror(errnum)), &(file->rwlock));
-    free(file);
+    if (tmp->path)
+        free(tmp->path);
+
+    free(tmp);
 }
 
-static void addFileToList(File **head, File *file)
+static void addFile(Filesystem *fs, File *file)
 {
-    file->next = *head;
-    *head = file;
-}
-
-static void deleteFileList(File **head)
-{
-    File *tmp;
-
-    while (*head)
-    {
-        tmp = *head;
-        *head = (*head)->next;
-
-        deleteFile(tmp);
-    }
+    icl_hash_insert(fs->hastTable, file->path, file);
 }
 
 Filesystem *initFileSystem(long maxFiles, long maxMemory)
@@ -66,9 +40,18 @@ Filesystem *initFileSystem(long maxFiles, long maxMemory)
     Filesystem *newFilesystem = NULL;
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFilesystem, perror("calloc"); return NULL, 1, sizeof(Filesystem));
 
-    newFilesystem->maxMemory = maxMemory;
-    newFilesystem->maxFiles = maxFiles;
-    newFilesystem->fileList = NULL;
+    newFilesystem->maxMemory = maxFiles;
+    newFilesystem->currFiles = 0;
+
+    newFilesystem->maxFiles = maxMemory;
+    newFilesystem->currMemory = 0;
+
+    newFilesystem->hastTable = icl_hash_create((int) (maxFiles * (0.75F)), NULL, NULL);
+    if (!newFilesystem->hastTable)
+    {
+        fprintf(stderr, "Errore creazione hash table per il filesystem\n");
+        return NULL;
+    }
 
     int errnum = 0;
     CHECK_RET_AND_ACTION(pthread_mutex_init, !=, 0, errnum,
@@ -78,47 +61,47 @@ Filesystem *initFileSystem(long maxFiles, long maxMemory)
     return newFilesystem;
 }
 
-void deleteFileSystem(Filesystem **fs)
+void deleteFileSystem(Filesystem *fs)
 {
-    if (!*fs)
+    if (!fs)
     {
         errno = EINVAL;
         return;
     }
 
-    deleteFileList(&((*fs)->fileList));
+    icl_hash_destroy(fs->hastTable, NULL, &deleteFile);
 
     int errnum = 0;
     CHECK_RET_AND_ACTION(pthread_mutex_destroy, !=, 0, errnum,
-                         fprintf(stderr, "pthread_mutex_destroy: %s", strerror(errnum)), &((*fs)->fileSystemLock));
+                         fprintf(stderr, "pthread_mutex_destroy: %s", strerror(errnum)), &(fs->fileSystemLock));
 
-    free(*fs);
+    free(fs);
 }
 
 void printFileSystem(Filesystem *fs)
 {
-    File *tmp = fs->fileList;
-
-    while (tmp)
-    {
-        printf("Filename: %s\n", tmp->path);
-        tmp = tmp->next;
-    }
+    char *fileName;
+    File *file;
+    int i;
+    icl_entry_t *entry;
+    icl_hash_foreach(fs->hastTable, i, entry, fileName, file, printf("File: %s\n", fileName));
 }
 
 void addDummyFiles(Filesystem *fs)
 {
-    char buf[6];
+    char buf[10];
     
+    LOCK(&(fs->fileSystemLock));
+
     for (size_t i = 0; i < 10; i++)
     {
-        snprintf(buf, 6, "file%ld", i);
+        
+        snprintf(buf, 10, "file%ld", fs->currFiles++);
         File *newFile = initFile(buf);
 
-        LOCK(&(fs->fileSystemLock));
-
-        addFileToList(&(fs->fileList), newFile);
-        
-        UNLOCK(&(fs->fileSystemLock));
+        printf("Thread: %ld adding file: %s\n", pthread_self(), newFile->path);
+        addFile(fs, newFile);
     }
+
+    UNLOCK(&(fs->fileSystemLock));
 }

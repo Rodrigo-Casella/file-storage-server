@@ -4,31 +4,28 @@
 #include <pthread.h>
 #include <time.h>
 
+#include "../include/icl_hash.h"
+
 typedef struct file
 {
     char *path;
-    void *data;
-    long dataSize;
-
-    time_t insertionTime;
-
-    pthread_rwlock_t rwlock;
-
-    struct file *next;
 } File;
 
 typedef struct filesystem
 {
     long maxFiles;
-    long maxMemory;
+    long currFiles;
 
-    File *fileList;
+    long maxMemory;
+    long currMemory;
+
+    icl_hash_t *hastTable;
 
     pthread_mutex_t fileSystemLock;
 } Filesystem;
 
 Filesystem *initFileSystem(long maxFiles, long maxMemory);
-void deleteFileSystem(Filesystem **fs);
+void deleteFileSystem(Filesystem *fs);
 void printFileSystem(Filesystem *fs);
 void addDummyFiles(Filesystem *fs);
 #endif

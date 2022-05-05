@@ -222,6 +222,6 @@ int main(int argc, char const *argv[])
     deleteBQueue(client_fd_queue, NULL);
     //stampo i contenuti del filesystem e lo elimino
     printFileSystem(fs);
-    deleteFileSystem(&fs);
+    deleteFileSystem(fs);
     return 0;
 }
