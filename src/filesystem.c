@@ -10,11 +10,25 @@
 #include "../include/utils.h"
 #include "../include/mutex.h"
 
+/**
+ * @brief Alloca e inizializza un file con pathname @param path pathname del file.
+ * 
+ * \retval NULL se non è stato possibile allocare o inizializzare il file (errno settato)
+ * \retval newFile puntatore al file allocato
+ */
 static File *initFile(const char *path)
 {
+    if (!path)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+
     File *newFile;
+    // alloco e inizializzo una struttura di tipo File, ritorno NULL se c'è stato un errore
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFile, perror("calloc"); return NULL, 1, sizeof(File));
 
+    //duplico il path del file, ritorno NULL se c'è stato un errore
     CHECK_RET_AND_ACTION(strndup, ==, NULL, newFile->path, perror("strndup"); return NULL, path, strlen(path) + 1);
 
     return newFile;
@@ -27,17 +41,42 @@ static void deleteFile(void* file)
     if (tmp->path)
         free(tmp->path);
 
-    free(tmp);
+    if (tmp)
+        free(tmp);
 }
 
-static void addFile(Filesystem *fs, File *file)
+static int addFile(Filesystem *fs, File *file)
 {
-    icl_hash_insert(fs->hastTable, file->path, file);
+    if (!fs || !file)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (!icl_hash_insert(fs->hastTable, file->path, file))
+        return -1;
+
+    return 0;
 }
 
+/**
+ * @brief Alloco e inizializzo un filesystem.
+ * 
+ * @param maxFiles numero massimo di file che possono essere memorizzati nel filesystem
+ * @param maxMemory spazio massimo che può occupare il filesystem (in bytes)
+ * 
+ * \retval NULL se c'è stato un errore allocando o inizializzando il filesystem (errno settato)
+ * \retval newFilesystem puntatore al filesystem allocato
+ */
 Filesystem *initFileSystem(long maxFiles, long maxMemory)
 {
-    Filesystem *newFilesystem = NULL;
+    if (maxFiles <= 0 || maxMemory <= 0)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    Filesystem *newFilesystem;
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFilesystem, perror("calloc"); return NULL, 1, sizeof(Filesystem));
 
     newFilesystem->maxMemory = maxFiles;
@@ -56,8 +95,10 @@ Filesystem *initFileSystem(long maxFiles, long maxMemory)
     int errnum = 0;
     CHECK_RET_AND_ACTION(pthread_mutex_init, !=, 0, errnum,
                          fprintf(stderr, "pthread_mutex_init: %s\n", strerror(errnum));
+                         errno = errnum;
                          return NULL,
                                 &(newFilesystem->fileSystemLock), NULL);
+                                
     return newFilesystem;
 }
 
