@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "../include/cmdLineParser.h"
+#include "../include/definitions.h"
 #include "../include/utils.h"
 #include "../include/api.h"
 
@@ -71,7 +72,25 @@ int writeFileHandler(char *file_path)
 {
     char resolved_path[PATH_MAX];
     SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
-    printf("scrivendo: %s\n", resolved_path);
+    
+    if (openFile(resolved_path, O_CREATE | O_LOCK) == -1)
+    {
+        perror("openFile");
+        return -1;
+    }
+        
+
+    if (writeFile(resolved_path, NULL) == -1)
+    {
+        perror("writeFile");
+        return -1;
+    }
+    
+    if (closeFile(resolved_path) == -1)
+    {
+        perror("closeFile");
+        return -1;
+    }
     return 0;
 }
 

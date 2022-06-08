@@ -17,6 +17,7 @@
 #include "../include/boundedqueue.h"
 #include "../include/worker.h"
 #include "../include/filesystem.h"
+#include "../include/message_protocol.h"
 
 #define DFL_SOCKET "./mysock"
 #define DFL_THREADS 2
@@ -166,42 +167,52 @@ int main(int argc, char const *argv[])
             if (FD_ISSET(fd, &set))
             {
 
-                if (fd == listen_fd)
+                if (fd == listen_fd) // richiesta di connessione
                 {
                     SYSCALL_RET_EQ_ACTION(accept, -1, fd_c, continue, listen_fd, NULL, 0);
-                    printf("Client %d connesso\n", fd_c);
 
-                    if (softQuit)
-                    {
+                    if (softQuit) {
                         SYSCALL_EQ_ACTION(close, -1, continue, fd_c);
-                        printf("Client %d disconnesso\n", fd_c);
+                        continue;
                     }
-                    /*FD_SET(fd_c, &set);
-                    fd_max = MAX(fd_max, fd_c);*/
-
-                    int *client_fd = malloc(sizeof(int));
-                    *client_fd = fd_c;
-                    push(client_fd_queue, client_fd);
-
+                    FD_SET(fd_c, &set);
+                    fd_max = MAX(fd_max, fd_c);
                     connected_clients++;
                 } 
-                else
+                else if (fd == workerManagerPipe[0]) // messaggio da un thread worker
                 {
-                    long fd_sent_from_worker;
-                    char buf[4];
+                    char buf[PIPE_BUF_LEN + 1] = "";
 
                     CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, 4);
 
-                    fd_sent_from_worker = atol(buf);
+                    long fd_sent_from_worker = atol(buf);
 
                     if(fd_sent_from_worker == 0) {
-                        connected_clients--;
+                        if (--connected_clients == 0 && softQuit)
+                            goto shutdown;
+
+                        continue;
                     }
+
+                    FD_SET(fd_sent_from_worker, &set);
+                    fd_max = MAX(fd_max, fd_sent_from_worker);
+                }
+                else // fd client già connesso
+                {
+                    FD_CLR(fd, &set);
+
+                    if (fd == fd_max)
+                        updatemax(set, fd_max);
+
+                    int *client_fd = malloc(sizeof(int));
+                    *client_fd = fd;
+                    CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), client_fd_queue, client_fd);
                 }
             }
         }
     }
 
+shutdown:
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
     // Mando segnale di terminazione ai thread worker

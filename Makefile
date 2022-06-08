@@ -15,7 +15,8 @@ OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
 BDIR = ./bin
 
-CC = gcc -g -std=c99 -pedantic -pthread
+CC = gcc -g -std=c99 -pedantic
+PTHREAD = -pthread
 CFLAGS = -Wall
 APILIB = -lapi
 LDFLAG = -lpthread
@@ -26,7 +27,7 @@ all: $(BDIR)/client $(BDIR)/server
 
 
 $(BDIR)/client: $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(BDIR) -L$(BDIR) $(APILIB) $(LDFLAG) 
+	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(BDIR) -L$(BDIR) $(APILIB) 
 
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
@@ -38,10 +39,10 @@ $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
 $(BDIR)/server: $(OBJSERVER) | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $^ $(LDFLAG)
+	$(CC) $(PTHREAD) -o $@ $(CFLAGS) $^ $(LDFLAG)
 
 $(OBJSERVER): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
-	$(CC) -c -o $@ $(CFLAGS) $< $(LDFLAG)
+	$(CC) $(PTHREAD) -c -o $@ $(CFLAGS) $< $(LDFLAG)
 
 $(BDIR):
 	mkdir -p $(BDIR)
