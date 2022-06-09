@@ -47,33 +47,30 @@ static char *readSegment(int fd, long *data_size)
 {
     char segment_len_buf[MAX_SEG_LEN + 1] = "";
     long segment_len = 0;
-    char *segment = NULL;
+    char *segment_buf = NULL;
 
     if (readn(fd, segment_len_buf, MAX_SEG_LEN) == -1)
-    {
         return NULL;
-    }
 
     if (isNumber(segment_len_buf, &segment_len) != 0)
     {
+        errno = EBADE;
         return NULL;
     }
+        
 
     if (data_size)
         *data_size = segment_len;
 
-    segment = calloc(segment_len + 1, sizeof(char));
+    segment_buf = calloc(segment_len + 1, sizeof(char));
 
-    if (!segment)
-    {
+    if (!segment_buf)
         return NULL;
-    }
 
-    if (readn(fd, segment, segment_len) == -1)
-    {
+    if (readn(fd, segment_buf, segment_len) == -1)
         return NULL;
-    }
-    return segment;
+
+    return segment_buf;
 }
 
 void *processRequest(void *args)
@@ -113,6 +110,7 @@ void *processRequest(void *args)
         if (isNumber(request_code_buf, &request_code) != 0)
         {
             SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
+            continue;
         }
 
         request_buf = readSegment(*client_fd, NULL);
@@ -120,6 +118,7 @@ void *processRequest(void *args)
         if (!request_buf)
         {
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
+            continue;
         }
 
         switch (request_code)
@@ -127,12 +126,14 @@ void *processRequest(void *args)
         case OPEN_FILE:
             if (readn(*client_fd, open_file_flag_buf, OPEN_FLAG_LEN) == -1)
             {
-                // TODO: handle error
+                SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
+                break;
             }
 
             if (isNumber(open_file_flag_buf, &open_file_flag) != 0)
             {
-                // TODO: handle error
+                SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
+                break;
             }
 
             if (openFileHandler(fs, request_buf, (int)open_file_flag, *client_fd) == -1)

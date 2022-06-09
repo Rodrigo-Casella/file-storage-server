@@ -1,133 +1,16 @@
 #include "../include/define_source.h"
 
 #include <errno.h>
-#include <pthread.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include <limits.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "../include/filesystem.h"
-#include "../include/utils.h"
-#include "../include/mutex.h"
 #include "../include/definitions.h"
-
-static fdNode *initNode(int fd)
-{
-    fdNode *newNode;
-    CHECK_RET_AND_ACTION(calloc, ==, NULL, newNode, perror("calloc"); return NULL, 1, sizeof(*newNode));
-
-    newNode->fd = fd;
-    newNode->next = newNode->prev = NULL;
-
-    return newNode;
-}
-
-static void deleteNode(fdNode *node)
-{
-    if (node)
-        free(node);
-}
-
-static fdList *initList()
-{
-    fdList *newList;
-    CHECK_RET_AND_ACTION(calloc, ==, NULL, newList, perror("calloc"); return NULL, 1, sizeof(*newList));
-
-    newList->head = newList->tail = NULL;
-
-    return newList;
-}
-
-static void deleteList(fdList *list)
-{
-    fdNode *tmp;
-
-    while (list->head)
-    {
-        tmp = list->head;
-        list->head = list->head->next;
-        deleteNode(tmp);
-    }
-
-    free(list);
-}
-
-static fdNode *getNode(fdList *list, int key)
-{
-    fdNode *curr = list->head;
-
-    while (curr)
-    {
-        if (curr->fd == key)
-        {
-            if (!curr->prev)
-            {
-                list->head = curr->next;
-            }
-            else
-            {
-                curr->prev->next = curr->next;
-                curr->next->prev = curr->prev;
-            }
-
-            curr->next = curr->prev = NULL;
-            return curr;
-        }
-    }
-    return NULL;
-}
-
-/**
- * @brief Cerca il nodo con la chive 'key' nella lista
- *
- * @param list lista in cui cercare
- * @param key chiave del nodo
- * \retval 1 se ho trovato il nodo
- * \retval 0 se non ho trovato il nodo
- */
-static int findNode(fdList *list, int key)
-{
-    fdNode *curr = list->head;
-
-    while (curr)
-    {
-        if (curr->fd == key)
-            return 1;
-
-        curr = curr->next;
-    }
-
-    return 0;
-}
-
-static int insertNode(fdList *list, int fd)
-{
-    if (!list || (fd <= 0))
-    {
-        errno = EINVAL;
-        return -1;
-    }
-
-    fdNode *newNode = initNode(fd);
-
-    if (!newNode)
-        return -1;
-
-    if (!list->head)
-    {
-        list->head = newNode;
-    }
-    else
-    {
-        newNode->prev = list->tail;
-        if (list->tail)
-            list->tail->next = newNode;
-    }
-
-    list->tail = newNode;
-    return 0;
-}
+#include "../include/filesystem.h"
+#include "../include/mutex.h"
+#include "../include/utils.h"
 
 /**
  * @brief Alloca e inizializza un file con pathname @param path pathname del file.
@@ -225,15 +108,6 @@ static int addFile(Filesystem *fs, File *file)
     return 0;
 }
 
-/**
- * @brief Alloco e inizializzo un filesystem.
- *
- * @param maxFiles numero massimo di file che possono essere memorizzati nel filesystem
- * @param maxMemory spazio massimo che può occupare il filesystem (in bytes)
- *
- * \retval NULL se c'è stato un errore allocando o inizializzando il filesystem (errno settato)
- * \retval newFilesystem puntatore al filesystem allocato
- */
 Filesystem *initFileSystem(long maxFiles, long maxMemory)
 {
     if (maxFiles <= 0 || maxMemory <= 0)
@@ -296,17 +170,6 @@ void printFileSystem(Filesystem *fs)
     icl_hash_foreach(fs->hastTable, i, entry, fileName, file, printf("File: %s\n", fileName));
 }
 
-/**
- * @brief apre un file del filesystem.
- *
- * @param fs puntatore al filesystem
- * @param path path del file da aprire
- * @param openFlags flags da settare aprendo il file
- * @param clientFd fd del processo che ha richiesto l'operazione
- *
- * \retval 0 se successo
- * \retval -1 se errore (errno settato opportunatamente)
- */
 int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientFd)
 {
     if (!fs || !path || (clientFd <= 0))
@@ -387,18 +250,6 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
     return 0;
 }
 
-/**
- * @brief Scrive un file nel filesystem. (Le scritture avvengono solo in append)
- *
- * @param fs puntatore al filesystem
- * @param path path del file da scrivere
- * @param data puntatore hai dati da scrivere
- * @param dataSize dimensione dei dati da scrivere
- * @param clientFd fd del processo che ha richiesto l'operazione
- *
- * \retval 0 se successo
- * \retval -1 se errore (errno settato opportunatamente)
- */
 int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, int clientFd)
 {
     if (!fs || !path || !data || (dataSize <= 0) || (clientFd <= 0))
@@ -499,16 +350,6 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     return 0;
 }
 
-/**
- * @brief chiude un file del filesystem.
- *
- * @param fs puntatore al filesystem
- * @param path path del file da chiudere
- * @param clientFd fd del processo che ha richiesto l'operazione
- *
- * \retval 0 se successo
- * \retval -1 se errore (errno settato opportunatamente)
- */
 int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
 {
     if (!fs || !path || (clientFd <= 0))

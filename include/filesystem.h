@@ -4,20 +4,8 @@
 #include <pthread.h>
 #include <time.h>
 
+#include "../include/fdList.h"
 #include "../include/icl_hash.h"
-
-typedef struct fd_node
-{
-    struct fd_node *prev;
-    int fd;
-    struct fd_node *next;
-} fdNode;
-
-typedef struct fd_list
-{
-    fdNode *head;
-    fdNode *tail;
-} fdList;
 
 typedef struct file
 {
@@ -50,11 +38,56 @@ typedef struct filesystem
     pthread_mutex_t fileSystemLock;
 } Filesystem;
 
+/**
+ * @brief Alloco e inizializzo un filesystem.
+ *
+ * @param maxFiles numero massimo di file che possono essere memorizzati nel filesystem
+ * @param maxMemory spazio massimo che può occupare il filesystem (in bytes)
+ *
+ * \retval NULL se c'è stato un errore allocando o inizializzando il filesystem (errno settato)
+ * \retval newFilesystem puntatore al filesystem allocato
+ */
 Filesystem *initFileSystem(long maxFiles, long maxMemory);
 void deleteFileSystem(Filesystem *fs);
 void printFileSystem(Filesystem *fs);
-int openFileHandler(Filesystem *fs, const char* path, int openFlags, int clientFd);
-int closeFileHandler(Filesystem *fs, const char* path, int clientFd);
-int writeFileHandler(Filesystem *fs, const char* path, void* data, size_t dataSize, int clientFd);
+
+/**
+ * @brief apre un file del filesystem.
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file da aprire
+ * @param openFlags flags da settare aprendo il file
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientFd);
+
+/**
+ * @brief Scrive un file nel filesystem. (Le scritture avvengono solo in append)
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file da scrivere
+ * @param data puntatore hai dati da scrivere
+ * @param dataSize dimensione dei dati da scrivere
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, int clientFd);
+
+/**
+ * @brief chiude un file del filesystem.
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file da chiudere
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int closeFileHandler(Filesystem *fs, const char *path, int clientFd);
 void addDummyFiles(Filesystem *fs);
 #endif

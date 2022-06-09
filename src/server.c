@@ -79,7 +79,7 @@ int main(int argc, char const *argv[])
     // Creo la pipe con cui i thread worker comunicherranno con il manager
     int workerManagerPipe[2];
     SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
-    // Ignoro SIGPIPE e imposto l'fd della read end della pipe come non bloccante
+    // Ignoro SIGPIPE
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
     //SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
@@ -119,7 +119,7 @@ int main(int argc, char const *argv[])
     strncpy(server_addr.sun_path, DFL_SOCKET, UNIX_PATH_MAX);
     server_addr.sun_family = AF_UNIX;
 
-    // Fd del server e fd più alta per la select
+    // Fd del server e fd massima per la select
     int listen_fd, fd_max = 0;
 
     fd_set set, rdset;
@@ -130,7 +130,7 @@ int main(int argc, char const *argv[])
     // Creo la socket del server
     SYSCALL_RET_EQ_ACTION(socket, -1, listen_fd, exit(EXIT_FAILURE), AF_UNIX, SOCK_STREAM, 0);
 
-    // Imposto i set per la select e calcolo il fd più alto
+    // Inizializzo i set e imposto i fd per la select, calcolando l'fd più alto
     FD_ZERO(&set);
     FD_ZERO(&rdset);
     FD_SET(listen_fd, &set);
@@ -170,23 +170,26 @@ int main(int argc, char const *argv[])
             {
                 if (fd == listen_fd) // richiesta di connessione
                 {
-                    int fd_c = 0; 
-                    SYSCALL_RET_EQ_ACTION(accept, -1, fd_c, continue, listen_fd, NULL, 0);
+                    int fd_client = 0; 
+                    SYSCALL_RET_EQ_ACTION(accept, -1, fd_client, continue, listen_fd, NULL, 0);
 
                     if (softQuit) {
-                        SYSCALL_EQ_ACTION(close, -1, continue, fd_c);
+                        SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), fd_client);
                         continue;
                     }
 
-                    FD_SET(fd_c, &set);
-                    fd_max = MAX(fd_max, fd_c);
-                    connected_clients++;
-                } 
-                else if (fd == workerManagerPipe[0]) // messaggio da un thread worker
+                    FD_SET(fd_client, &set);
+                    fd_max = MAX(fd_max, fd_client);
+                    ++connected_clients;
+
+                    continue;
+                }
+
+                if (fd == workerManagerPipe[0]) // messaggio da un thread worker
                 {
                     char buf[PIPE_BUF_LEN + 1] = "";
 
-                    CHECK_AND_ACTION(read, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
+                    CHECK_AND_ACTION(read, ==, -1, perror("read"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
 
                     long fd_sent_from_worker = atol(buf);
 
@@ -199,18 +202,18 @@ int main(int argc, char const *argv[])
 
                     FD_SET(fd_sent_from_worker, &set);
                     fd_max = MAX(fd_max, fd_sent_from_worker);
+                    continue;
                 }
-                else // fd client già connesso
-                {
-                    FD_CLR(fd, &set);
+                
+                // fd client già connesso
+                FD_CLR(fd, &set);
 
-                    if (fd == fd_max)
-                        fd_max = updatemax(set, fd_max);
+                if (fd == fd_max)
+                    fd_max = updatemax(set, fd_max);
 
-                    int *client_fd = malloc(sizeof(int));
-                    *client_fd = fd;
-                    CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), client_fd_queue, client_fd);
-                }
+                int *client_fd = malloc(sizeof(int));
+                *client_fd = fd;
+                CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), client_fd_queue, client_fd); 
             }
         }
     }
