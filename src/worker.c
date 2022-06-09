@@ -95,7 +95,7 @@ void *processRequest(void *args)
                                              response_code_buf[RES_CODE_LEN + 1] = "";
 
         char *request_buf,
-            *file_data;
+            *file_data_buf;
 
         long request_code = 0,
              open_file_flag = 0,
@@ -103,7 +103,6 @@ void *processRequest(void *args)
 
         if (read((*client_fd), request_code_buf, REQ_CODE_LEN) == 0)
         {
-
             SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
             free(client_fd);
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, CLIENT_LEFT_MSG, PIPE_BUF_LEN);
@@ -145,21 +144,21 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
         case WRITE_FILE:
-            file_data = readSegment(*client_fd, &file_size);
+            file_data_buf = readSegment(*client_fd, &file_size);
 
-            if (!file_data)
+            if (!file_data_buf)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
             }
 
-            if (writeFileHandler(fs, request_buf, file_data, file_size, *client_fd) == -1)
+            if (writeFileHandler(fs, request_buf, file_data_buf, file_size, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
             }
 
-            free(file_data);
+            free(file_data_buf);
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
@@ -175,10 +174,9 @@ void *processRequest(void *args)
         default:
             break;
         }
-
         free(request_buf);
-
-        snprintf(pipe_buf, PIPE_BUF_LEN, "%d", *client_fd);
+        
+        snprintf(pipe_buf, PIPE_BUF_LEN + 1, "%04d", *client_fd);
         CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, pipe_buf, PIPE_BUF_LEN);
         free(client_fd);
     }

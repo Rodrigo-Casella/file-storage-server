@@ -54,7 +54,7 @@ int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
-static int readFileFromPath(const char *path, void *file_data, size_t *file_len)
+static int readFileFromPath(const char *path, char **file_data, size_t *file_len)
 {
     int file_fd = open(path, O_RDONLY);
 
@@ -66,21 +66,24 @@ static int readFileFromPath(const char *path, void *file_data, size_t *file_len)
     if ((*file_len) == -1)
         return -1;
 
-    if (lseek(file_fd, 0, SEEK_SET) == -1)
+    if (lseek(file_fd, 0L, SEEK_SET) == -1)
         return -1;
 
-    file_data = calloc((*file_len) + 1, sizeof(char));
+    *file_data = calloc((*file_len) + 1, sizeof(char));
 
     if (!file_data)
         return -1;
 
     char buf[BUF_SIZE];
-    char *file_data_ptr = (char *)file_data;
+    char *file_data_ptr = (char *)(*file_data);
     int bytes_read = 0;
     size_t bytes_copied = 0;
 
-    while ((bytes_read = readn(file_fd, buf, BUF_SIZE)) != 0)
+    while (bytes_copied < (*file_len))
     {
+        if ((bytes_read = readn(file_fd, buf, BUF_SIZE)) == -1)
+            break;
+
         memcpy(file_data_ptr + bytes_copied, buf, bytes_read);
         bytes_copied += bytes_read;
     }
@@ -190,10 +193,10 @@ int writeFile(const char *pathname, const char *dirname)
         return -1;
     }
 
-    char *file_data = NULL;
+    char *file_data_buf = NULL;
     size_t file_len = 0;
 
-    if (readFileFromPath(pathname, file_data, &file_len) == -1)
+    if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
         return -1;
 
     size_t request_len = REQ_CODE_LEN + MAX_SEG_LEN + pathname_len + 1 + MAX_SEG_LEN + file_len;
@@ -203,13 +206,12 @@ int writeFile(const char *pathname, const char *dirname)
         return -1;
 
     snprintf(request, request_len + 1, "%d%010ld%s%010ld", WRITE_FILE, pathname_len, pathname, file_len);
-
-    memcpy((request + strlen(request)), file_data, file_len);
+    memcpy((request + strlen(request)), file_data_buf, file_len);
 
     if (writen(fd_skt, request, request_len - 1) == -1)
         return -1;
-
-    free(file_data);
+    
+    free(file_data_buf);
     free(request);
 
     SERVER_RESPONSE(writeFile, pathname);

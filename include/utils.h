@@ -1,16 +1,16 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include <string.h>
 #include <errno.h>
-#include <stdlib.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
 #define BUF_SIZE 1024
 #define UNIX_PATH_MAX 108
-#define EOS (void*)0x1
+#define EOS (void *)0x1
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -168,11 +168,11 @@ static inline int readn(long fd, void *buf, size_t size)
             return -1;
         }
         if (r == 0)
-            return 0;
+            break;
         left -= r;
         bufptr += r;
     }
-    return size;
+    return (size - left);
 }
 
 static inline int writen(long fd, void *buf, size_t size)
@@ -189,11 +189,11 @@ static inline int writen(long fd, void *buf, size_t size)
             return -1;
         }
         if (r == 0)
-            return 0;
+            break;
         left -= r;
         bufptr += r;
     }
-    return 1;
+    return (size - left);
 }
 
 #endif

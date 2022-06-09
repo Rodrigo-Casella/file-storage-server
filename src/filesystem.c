@@ -245,11 +245,11 @@ Filesystem *initFileSystem(long maxFiles, long maxMemory)
     Filesystem *newFilesystem;
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFilesystem, perror("calloc"); return NULL, 1, sizeof(Filesystem));
 
-    newFilesystem->maxMemory = maxFiles;
+    newFilesystem->maxFiles = maxFiles;
     newFilesystem->currFiles = 0;
     newFilesystem->absMaxFiles = 0;
 
-    newFilesystem->maxFiles = maxMemory;
+    newFilesystem->maxMemory = maxMemory;
     newFilesystem->currMemory = 0;
     newFilesystem->absMaxMemory = 0;
 
@@ -421,15 +421,6 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     LOCK(&(file->fileLock))
 
-    // I dati da scrivere sono troppi per lo storage
-    if ((file->dataSize + dataSize) > fs->maxMemory)
-    {
-        UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
-        errno = EFBIG;
-        return -1;
-    }
-
     // il file è in stato di lock
     if ((file->lockedBy && file->lockedBy != clientFd))
     {
@@ -445,6 +436,15 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         UNLOCK(&(file->fileLock));
         UNLOCK(&(fs->fileSystemLock));
         errno = EBADF;
+        return -1;
+    }
+
+    // I dati da scrivere sono troppi per lo storage
+    if ((file->dataSize + dataSize) > fs->maxMemory)
+    {
+        UNLOCK(&(file->fileLock));
+        UNLOCK(&(fs->fileSystemLock));
+        errno = EFBIG;
         return -1;
     }
 
@@ -495,6 +495,7 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     file->isWritten = 0;
 
     UNLOCK(&(file->fileLock));
+    UNLOCK(&(fs->fileSystemLock));
     return 0;
 }
 

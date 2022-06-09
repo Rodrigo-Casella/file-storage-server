@@ -81,11 +81,11 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
     // Ignoro SIGPIPE e imposto l'fd della read end della pipe come non bloccante
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
-    SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
+    //SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
     // Inizializzo il filesystem
     Filesystem *fs = NULL;
-    fs = initFileSystem(100, 10000);
+    fs = initFileSystem(100, 1000000000);
 
     // Passo i riferimenti alla struttura per gli argomenti dei thread
     ThreadArgs *th_args = malloc(sizeof(*th_args));
@@ -130,12 +130,14 @@ int main(int argc, char const *argv[])
     // Creo la socket del server
     SYSCALL_RET_EQ_ACTION(socket, -1, listen_fd, exit(EXIT_FAILURE), AF_UNIX, SOCK_STREAM, 0);
 
-    // Calcolo il fd più alto e imposto i set per la select
-    fd_max = MAX(fd_max, listen_fd);
+    // Imposto i set per la select e calcolo il fd più alto
     FD_ZERO(&set);
+    FD_ZERO(&rdset);
     FD_SET(listen_fd, &set);
+    FD_SET(workerManagerPipe[0], &set);
+    fd_max = MAX( listen_fd, workerManagerPipe[0]);
 
-    // Lego la socket con l'indirizzo del server e mi metto in ascolto di richieste di connessione
+    // Eseguo la bind del socket con l'indirizzo del server e mi metto in ascolto di richieste di connessione
     SYSCALL_EQ_ACTION(bind, -1, exit(EXIT_FAILURE), listen_fd, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     SYSCALL_EQ_ACTION(listen, -1, exit(EXIT_FAILURE), listen_fd, SOMAXCONN);
 
@@ -163,18 +165,19 @@ int main(int argc, char const *argv[])
 
         for (int fd = 0; fd <= fd_max; fd++)
         {
-            int fd_c;
-            if (FD_ISSET(fd, &set))
+            
+            if (FD_ISSET(fd, &rdset))
             {
-
                 if (fd == listen_fd) // richiesta di connessione
                 {
+                    int fd_c = 0; 
                     SYSCALL_RET_EQ_ACTION(accept, -1, fd_c, continue, listen_fd, NULL, 0);
 
                     if (softQuit) {
                         SYSCALL_EQ_ACTION(close, -1, continue, fd_c);
                         continue;
                     }
+
                     FD_SET(fd_c, &set);
                     fd_max = MAX(fd_max, fd_c);
                     connected_clients++;
@@ -183,7 +186,7 @@ int main(int argc, char const *argv[])
                 {
                     char buf[PIPE_BUF_LEN + 1] = "";
 
-                    CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, 4);
+                    CHECK_AND_ACTION(read, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
 
                     long fd_sent_from_worker = atol(buf);
 
@@ -202,7 +205,7 @@ int main(int argc, char const *argv[])
                     FD_CLR(fd, &set);
 
                     if (fd == fd_max)
-                        updatemax(set, fd_max);
+                        fd_max = updatemax(set, fd_max);
 
                     int *client_fd = malloc(sizeof(int));
                     *client_fd = fd;
