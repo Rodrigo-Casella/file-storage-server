@@ -163,11 +163,11 @@ void deleteFileSystem(Filesystem *fs)
 
 void printFileSystem(Filesystem *fs)
 {
-    char *fileName;
-    File *file;
-    int i;
-    icl_entry_t *entry;
-    icl_hash_foreach(fs->hastTable, i, entry, fileName, file, printf("File: %s\n", fileName));
+    char *tmpFileName;
+    File *tmpFile;
+    int tmpIndex;
+    icl_entry_t *tmpEntry;
+    icl_hash_foreach(fs->hastTable, tmpIndex, tmpEntry, tmpFileName, tmpFile, printf("File: %s, dataSize: %ld\n", tmpFileName, tmpFile->dataSize));
 }
 
 int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientFd)
@@ -241,7 +241,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
     {
         CHECK_AND_ACTION(insertNode, ==, -1,
                          UNLOCK(&(file->fileLock));
-                         UNLOCK(&(fs->fileSystemLock)); return -1, file->openedBy, clientFd);
+                         UNLOCK(&(fs->fileSystemLock)); errno = ENOMEM; return -1, file->openedBy, clientFd);
     }
 
     UNLOCK(&(file->fileLock));

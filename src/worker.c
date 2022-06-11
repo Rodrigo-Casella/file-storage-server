@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../include/worker.h"
-#include "../include/utils.h"
 #include "../include/message_protocol.h"
+#include "../include/utils.h"
+#include "../include/worker.h"
 
 #define THREAD_ERR_EXIT                                         \
     fprintf(stderr, "Errore in thread: %ld\n", pthread_self()); \
@@ -13,8 +13,9 @@
 
 #define SEND_RESPONSE_CODE(fd, response_code)                           \
     snprintf(response_code_buf, RES_CODE_LEN + 1, "%d", response_code); \
-    if (writen(*client_fd, response_code_buf, RES_CODE_LEN) == -1)      \
+    if (write(*client_fd, response_code_buf, RES_CODE_LEN) == -1)      \
     {                                                                   \
+        perror("write");                                               \
         THREAD_ERR_EXIT;                                                \
     }
 
@@ -57,7 +58,6 @@ static char *readSegment(int fd, long *data_size)
         errno = EBADE;
         return NULL;
     }
-        
 
     if (data_size)
         *data_size = segment_len;
@@ -124,7 +124,7 @@ void *processRequest(void *args)
         switch (request_code)
         {
         case OPEN_FILE:
-            if (readn(*client_fd, open_file_flag_buf, OPEN_FLAG_LEN) == -1)
+            if (read(*client_fd, open_file_flag_buf, OPEN_FLAG_LEN) == -1)
             {
                 SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
                 break;
@@ -176,7 +176,7 @@ void *processRequest(void *args)
             break;
         }
         free(request_buf);
-        
+
         snprintf(pipe_buf, PIPE_BUF_LEN + 1, "%04d", *client_fd);
         CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, pipe_buf, PIPE_BUF_LEN);
         free(client_fd);

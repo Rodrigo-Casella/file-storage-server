@@ -81,7 +81,7 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
     // Ignoro SIGPIPE
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
-    //SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
+    SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
     // Inizializzo il filesystem
     Filesystem *fs = NULL;
@@ -189,7 +189,7 @@ int main(int argc, char const *argv[])
                 {
                     char buf[PIPE_BUF_LEN + 1] = "";
 
-                    CHECK_AND_ACTION(read, ==, -1, perror("read"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
+                    CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
 
                     long fd_sent_from_worker = atol(buf);
 

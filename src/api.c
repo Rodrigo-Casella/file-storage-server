@@ -2,18 +2,18 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <limits.h>
+#include <stdio.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "../include/api.h"
-#include "../include/utils.h"
 #include "../include/message_protocol.h"
+#include "../include/utils.h"
 
 #define BUF_SIZE 1024
 
@@ -47,49 +47,52 @@ const char *responseMsg[] = {
         if (toPrint)                                    \
             PRINT_OP(op, file, outcome);                \
                                                         \
-        errno = outcome != 1 ? EBADE : 0;               \
+        errno = outcome != SUCCESS ? EBADE : 0;         \
     }
+
+#define PRINT_RDWR_BYTES(bytes, op) \
+if(toPrint) { \
+    fprintf(stdout, "%ld bytes %s\n", bytes, #op); \
+}
 
 int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
-static int readFileFromPath(const char *path, char **file_data, size_t *file_len)
+static int readFileFromPath(const char *path, void **file_data, size_t *file_len)
 {
-    int file_fd = open(path, O_RDONLY);
+    int file_fd;
+    char buf[BUF_SIZE];
+    char *file_data_ptr;
+    int bytes_read;
+    size_t bytes_copied;
 
-    if (file_fd == -1)
+    if ((file_fd = open(path, O_RDONLY)) == -1)
         return -1;
 
-    *file_len = lseek(file_fd, 0L, SEEK_END);
-
-    if ((*file_len) == -1)
+    if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
         return -1;
 
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
         return -1;
 
-    *file_data = calloc((*file_len) + 1, sizeof(char));
+    *file_data = calloc((*file_len) + 1, 1);
 
     if (!file_data)
         return -1;
 
-    char buf[BUF_SIZE];
-    char *file_data_ptr = (char *)(*file_data);
-    int bytes_read = 0;
-    size_t bytes_copied = 0;
+    file_data_ptr = (char *) *file_data;
+    bytes_copied = 0;
 
     while (bytes_copied < (*file_len))
     {
         if ((bytes_read = readn(file_fd, buf, BUF_SIZE)) == -1)
-            break;
+            return -1;
 
+        
         memcpy(file_data_ptr + bytes_copied, buf, bytes_read);
         bytes_copied += bytes_read;
     }
-
-    if (errno != 0)
-        return -1;
 
     close(file_fd);
 
@@ -171,9 +174,9 @@ int openFile(const char *pathname, int flags)
     if (!request)
         return -1;
 
-    snprintf(request, request_len + 1, "%d%010ld%s%d", OPEN_FILE, pathname_length, pathname, flags);
+    snprintf(request, request_len, "%d%010ld%s%d", OPEN_FILE, pathname_length, pathname, flags);
 
-    if (writen(fd_skt, request, request_len - 1) != 1)
+    if (writen(fd_skt, request, request_len - 1) == -1)
         return -1;
 
     free(request);
@@ -193,7 +196,7 @@ int writeFile(const char *pathname, const char *dirname)
         return -1;
     }
 
-    char *file_data_buf = NULL;
+    void *file_data_buf = NULL;
     size_t file_len = 0;
 
     if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
@@ -205,17 +208,17 @@ int writeFile(const char *pathname, const char *dirname)
     if (!request)
         return -1;
 
-    snprintf(request, request_len + 1, "%d%010ld%s%010ld", WRITE_FILE, pathname_len, pathname, file_len);
+    snprintf(request, request_len, "%d%010ld%s%010ld", WRITE_FILE, pathname_len, pathname, file_len);
     memcpy((request + strlen(request)), file_data_buf, file_len);
 
     if (writen(fd_skt, request, request_len - 1) == -1)
         return -1;
-    
+
     free(file_data_buf);
     free(request);
 
     SERVER_RESPONSE(writeFile, pathname);
-
+    PRINT_RDWR_BYTES(file_len, scritti);
     return errno ? -1 : 0;
 }
 
@@ -235,9 +238,9 @@ int closeFile(const char *pathname)
     if (!request)
         return -1;
 
-    snprintf(request, request_len + 1, "%d%010ld%s", CLOSE_FILE, pathname_length, pathname);
+    snprintf(request, request_len, "%d%010ld%s", CLOSE_FILE, pathname_length, pathname);
 
-    if (writen(fd_skt, request, request_len - 1) != 1)
+    if (writen(fd_skt, request, request_len - 1) == -1)
         return -1;
 
     free(request);
