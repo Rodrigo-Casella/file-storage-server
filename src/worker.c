@@ -12,12 +12,15 @@
     fprintf(stderr, "Errore in thread: %ld\n", pthread_self()); \
     pthread_exit((void *)EXIT_FAILURE);
 
-#define SEND_RESPONSE_CODE(fd, code)                            \
-    response_code = code;                                       \
-    if (write(fd, &response_code, sizeof(response_code)) == -1) \
-    {                                                           \
-        perror("write");                                        \
-        THREAD_ERR_EXIT;                                        \
+#define SEND_RESPONSE_CODE(fd, code)                                 \
+    if (1)                                                           \
+    {                                                                \
+        int response_code = code;                                    \
+        if (writen(fd, &response_code, sizeof(response_code)) == -1) \
+        {                                                            \
+            perror("write");                                         \
+            THREAD_ERR_EXIT;                                         \
+        }                                                            \
     }
 
 #define SEND_ERROR_CODE(fd)                  \
@@ -110,7 +113,6 @@ void *processRequest(void *args)
             *file_data_buf;
 
         int request_code,
-            response_code,
             open_file_flag;
 
         size_t file_size = 0,

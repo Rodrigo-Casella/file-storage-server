@@ -31,30 +31,30 @@ const char *responseMsg[] = {
 #define PRINT_OP(op, file, outcome) \
     printf("%s: %s %s", #op, file, responseMsg[outcome - 1]);
 
-#define SERVER_RESPONSE(op, file)                       \
-    if (1)                                              \
-    {                                                   \
-        char response[RES_CODE_LEN + 1] = "";           \
-        if (read(fd_skt, response, RES_CODE_LEN) == -1) \
-            return -1;                                  \
-                                                        \
-        long outcome = 0;                               \
-        if (isNumber(response, &outcome) != 0)          \
-        {                                               \
-            PRINT_OP(op, file, INVALID_RES);            \
-            errno = EINVAL;                             \
-            return -1;                                  \
-        }                                               \
-        if (toPrint)                                    \
-            PRINT_OP(op, file, outcome);                \
-                                                        \
-        errno = outcome != SUCCESS ? EBADE : 0;         \
+#define SERVER_RESPONSE(op, file)                                   \
+    if (1)                                                          \
+    {                                                               \
+        int response_code;                                          \
+        if (read(fd_skt, &response_code, sizeof(int)) == -1)        \
+            return -1;                                              \
+                                                                    \
+        if (response_code < SUCCESS || response_code > INVALID_RES) \
+        {                                                           \
+            PRINT_OP(op, file, INVALID_RES);                        \
+            errno = EINVAL;                                         \
+            return -1;                                              \
+        }                                                           \
+        if (toPrint)                                                \
+            PRINT_OP(op, file, response_code);                      \
+                                                                    \
+        errno = response_code != SUCCESS ? EBADE : 0;               \
     }
 
-#define PRINT_RDWR_BYTES(bytes, op) \
-if(toPrint && !errno) { \
-    printf("%ld bytes %s\n", bytes, #op); \
-}
+#define PRINT_RDWR_BYTES(bytes, op)           \
+    if (toPrint && !errno)                    \
+    {                                         \
+        printf("%ld bytes %s\n", bytes, #op); \
+    }
 
 int toPrint = 0;
 int fd_skt = 0;
@@ -80,12 +80,12 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
     *file_data = calloc((*file_len), 1);
 
     size_t chunk_size = *file_len / BUF_SIZE;
-    buf =  calloc(chunk_size, sizeof(char));
+    buf = calloc(chunk_size, sizeof(char));
 
     if (!(*file_data) || !buf)
         return -1;
 
-    file_data_ptr = (char *) *file_data;
+    file_data_ptr = (char *)*file_data;
     bytes_copied = 0;
 
     while (bytes_copied < (*file_len))
@@ -93,12 +93,11 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
         if ((bytes_read = readn(file_fd, buf, chunk_size)) == -1)
             return -1;
 
-        
         memcpy(file_data_ptr + bytes_copied, buf, bytes_read);
         bytes_copied += bytes_read;
     }
 
-    if(close(file_fd) == -1)
+    if (close(file_fd) == -1)
         return -1;
 
     return 0;
@@ -191,7 +190,7 @@ int openFile(const char *pathname, int flags)
         return -1;
     }
     int op = OPEN_FILE;
-    char *pathname_buf = calloc(++pathname_length, sizeof(char)); // alloco memoria per la stringa + '\0' 
+    char *pathname_buf = calloc(++pathname_length, sizeof(char)); // alloco memoria per la stringa + '\0'
 
     if (!pathname_buf)
         return -1;
@@ -199,7 +198,7 @@ int openFile(const char *pathname, int flags)
     strncpy(pathname_buf, pathname, pathname_length);
 
     struct iovec request[4];
-    
+
     request[0].iov_base = &op;
     request[0].iov_len = sizeof(op);
 
@@ -211,10 +210,10 @@ int openFile(const char *pathname, int flags)
 
     request[3].iov_base = &flags;
     request[3].iov_len = sizeof(flags);
-    
+
     if (writev(fd_skt, request, 4) == -1)
         return -1;
-        
+
     free(pathname_buf);
 
     SERVER_RESPONSE(openFile, pathname);
@@ -239,7 +238,7 @@ int writeFile(const char *pathname, const char *dirname)
         return -1;
 
     int op = WRITE_FILE;
-    
+
     char *pathname_buf = calloc(++pathname_length, sizeof(char));
 
     if (!pathname_buf)
@@ -263,7 +262,7 @@ int writeFile(const char *pathname, const char *dirname)
 
     request[4].iov_base = file_data_buf;
     request[4].iov_len = file_len;
-    
+
     if (writev(fd_skt, request, 5) == -1)
     {
         perror("writev");
@@ -299,7 +298,7 @@ int closeFile(const char *pathname)
     strncpy(pathname_buf, pathname, pathname_length);
 
     struct iovec request[3];
-    
+
     request[0].iov_base = &op;
     request[0].iov_len = sizeof(op);
 
@@ -308,15 +307,15 @@ int closeFile(const char *pathname)
 
     request[2].iov_base = pathname_buf;
     request[2].iov_len = pathname_length;
-    
+
     if (writev(fd_skt, request, 3) == -1)
     {
         perror("writev");
         return -1;
     }
-    
+
     free(pathname_buf);
-    
+
     SERVER_RESPONSE(closeFile, pathname);
 
     return errno ? -1 : 0;
