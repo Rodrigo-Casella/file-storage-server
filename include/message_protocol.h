@@ -10,7 +10,13 @@
 
 #define OPEN_FILE 1
 #define WRITE_FILE 2
-#define CLOSE_FILE 3
+#define READ_FILE 3
+#define READ_N_FILE 4
+#define LOCK_FILE 5
+#define UNLOCK_FILE 6
+#define REMOVE_FILE 7
+#define CLOSE_FILE 8
+#define CLOSE_CONNECTION 9 
 
 #define SUCCESS 1 // operazione terminata con successo
 #define INVALID_REQ 2 // richiesta invalida

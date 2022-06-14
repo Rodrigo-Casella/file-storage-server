@@ -122,7 +122,7 @@ int main(int argc, char const *argv[])
     // Fd del server e fd massima per la select
     int listen_fd, fd_max = 0;
 
-    fd_set set, rdset;
+    fd_set master_set, working_set;
 
     // Numero di client attualmente connessi
     int connected_clients = 0;
@@ -130,11 +130,10 @@ int main(int argc, char const *argv[])
     // Creo la socket del server
     SYSCALL_RET_EQ_ACTION(socket, -1, listen_fd, exit(EXIT_FAILURE), AF_UNIX, SOCK_STREAM, 0);
 
-    // Inizializzo i set e imposto i fd per la select, calcolando l'fd più alto
-    FD_ZERO(&set);
-    FD_ZERO(&rdset);
-    FD_SET(listen_fd, &set);
-    FD_SET(workerManagerPipe[0], &set);
+    // Inizializzo il master_set e imposto i fd per la select, calcolando l'fd più alto
+    FD_ZERO(&master_set);
+    FD_SET(listen_fd, &master_set);
+    FD_SET(workerManagerPipe[0], &master_set);
     fd_max = MAX( listen_fd, workerManagerPipe[0]);
 
     // Eseguo la bind del socket con l'indirizzo del server e mi metto in ascolto di richieste di connessione
@@ -146,10 +145,10 @@ int main(int argc, char const *argv[])
     while (!hardQuit)
     {
 
-        // ripristino il set dei fd in lettura
-        rdset = set;
+        // copio il master fd_set sul working fd_set
+        memcpy(&working_set, &master_set, sizeof(master_set));
 
-        if (select(fd_max + 1, &rdset, NULL, NULL, NULL) == -1)
+        if (select(fd_max + 1, &working_set, NULL, NULL, NULL) == -1)
         {
             // Se ricevo un interruzione esco dal ciclo subito se: non ci sono client connessi e ho ricevuto SIGHUP, ho ricevuto SIGINT o SIGQUIT
             if (errno == EINTR)
@@ -166,7 +165,7 @@ int main(int argc, char const *argv[])
         for (int fd = 0; fd <= fd_max; fd++)
         {
             
-            if (FD_ISSET(fd, &rdset))
+            if (FD_ISSET(fd, &working_set))
             {
                 if (fd == listen_fd) // richiesta di connessione
                 {
@@ -178,7 +177,7 @@ int main(int argc, char const *argv[])
                         continue;
                     }
 
-                    FD_SET(fd_client, &set);
+                    FD_SET(fd_client, &master_set);
                     fd_max = MAX(fd_max, fd_client);
                     ++connected_clients;
 
@@ -187,11 +186,9 @@ int main(int argc, char const *argv[])
 
                 if (fd == workerManagerPipe[0]) // messaggio da un thread worker
                 {
-                    char buf[PIPE_BUF_LEN + 1] = "";
-
-                    CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], buf, PIPE_BUF_LEN);
-
-                    long fd_sent_from_worker = atol(buf);
+                    int fd_sent_from_worker;
+                    
+                    CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], &fd_sent_from_worker, sizeof(int));
 
                     if(fd_sent_from_worker == 0) {
                         if (--connected_clients == 0 && softQuit)
@@ -200,20 +197,22 @@ int main(int argc, char const *argv[])
                         continue;
                     }
 
-                    FD_SET(fd_sent_from_worker, &set);
+                    FD_SET(fd_sent_from_worker, &master_set);
                     fd_max = MAX(fd_max, fd_sent_from_worker);
                     continue;
                 }
                 
-                // fd client già connesso
-                FD_CLR(fd, &set);
+                // Un fd di un client già connesso è pronto per la lettura, quindi lo elimino dal master fd_set e lo spedisco ai thread worker
+                FD_CLR(fd, &master_set);
 
                 if (fd == fd_max)
-                    fd_max = updatemax(set, fd_max);
+                    fd_max = updatemax(master_set, fd_max);
 
-                int *client_fd = malloc(sizeof(int));
-                *client_fd = fd;
-                CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), client_fd_queue, client_fd); 
+                int *client_fd;
+                CHECK_RET_AND_ACTION(malloc, ==, NULL, client_fd, perror("malloc"); exit(EXIT_FAILURE), sizeof(fd));
+                memcpy(client_fd, &fd, sizeof(fd));
+
+                CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), client_fd_queue, client_fd);
             }
         }
     }

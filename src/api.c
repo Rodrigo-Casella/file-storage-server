@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
@@ -51,8 +52,8 @@ const char *responseMsg[] = {
     }
 
 #define PRINT_RDWR_BYTES(bytes, op) \
-if(toPrint) { \
-    fprintf(stdout, "%ld bytes %s\n", bytes, #op); \
+if(toPrint && !errno) { \
+    printf("%ld bytes %s\n", bytes, #op); \
 }
 
 int toPrint = 0;
@@ -62,7 +63,7 @@ char server_addr_path[UNIX_PATH_MAX];
 static int readFileFromPath(const char *path, void **file_data, size_t *file_len)
 {
     int file_fd;
-    char buf[BUF_SIZE];
+    char *buf;
     char *file_data_ptr;
     int bytes_read;
     size_t bytes_copied;
@@ -76,9 +77,12 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
         return -1;
 
-    *file_data = calloc((*file_len) + 1, 1);
+    *file_data = calloc((*file_len), 1);
 
-    if (!file_data)
+    size_t chunk_size = *file_len / BUF_SIZE;
+    buf =  calloc(chunk_size, sizeof(char));
+
+    if (!(*file_data) || !buf)
         return -1;
 
     file_data_ptr = (char *) *file_data;
@@ -86,7 +90,7 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
 
     while (bytes_copied < (*file_len))
     {
-        if ((bytes_read = readn(file_fd, buf, BUF_SIZE)) == -1)
+        if ((bytes_read = readn(file_fd, buf, chunk_size)) == -1)
             return -1;
 
         
@@ -94,7 +98,8 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
         bytes_copied += bytes_read;
     }
 
-    close(file_fd);
+    if(close(file_fd) == -1)
+        return -1;
 
     return 0;
 }
@@ -150,6 +155,24 @@ int closeConnection(const char *sockname)
         return -1;
     }
 
+    int op = CLOSE_CONNECTION;
+    size_t left_msg_len = 1;
+    char left_msg[1] = "0";
+
+    struct iovec request[3];
+
+    request[0].iov_base = &op;
+    request[0].iov_len = sizeof(op);
+
+    request[1].iov_base = &left_msg_len;
+    request[1].iov_len = sizeof(left_msg_len);
+
+    request[2].iov_base = left_msg;
+    request[2].iov_len = left_msg_len;
+
+    if (writev(fd_skt, request, 3) == -1)
+        return -1;
+
     SYSCALL_EQ_ACTION(close, -1, return -1, fd_skt);
 
     if (toPrint)
@@ -167,19 +190,32 @@ int openFile(const char *pathname, int flags)
         errno = EINVAL;
         return -1;
     }
+    int op = OPEN_FILE;
+    char *pathname_buf = calloc(++pathname_length, sizeof(char)); // alloco memoria per la stringa + '\0' 
 
-    size_t request_len = REQ_CODE_LEN + MAX_SEG_LEN + pathname_length + 1 + OPEN_FLAG_LEN;
-    char *request = calloc(request_len, sizeof(char));
-
-    if (!request)
+    if (!pathname_buf)
         return -1;
 
-    snprintf(request, request_len, "%d%010ld%s%d", OPEN_FILE, pathname_length, pathname, flags);
+    strncpy(pathname_buf, pathname, pathname_length);
 
-    if (writen(fd_skt, request, request_len - 1) == -1)
+    struct iovec request[4];
+    
+    request[0].iov_base = &op;
+    request[0].iov_len = sizeof(op);
+
+    request[1].iov_base = &pathname_length;
+    request[1].iov_len = sizeof(pathname_length);
+
+    request[2].iov_base = pathname_buf;
+    request[2].iov_len = pathname_length;
+
+    request[3].iov_base = &flags;
+    request[3].iov_len = sizeof(flags);
+    
+    if (writev(fd_skt, request, 4) == -1)
         return -1;
-
-    free(request);
+        
+    free(pathname_buf);
 
     SERVER_RESPONSE(openFile, pathname);
 
@@ -188,9 +224,9 @@ int openFile(const char *pathname, int flags)
 
 int writeFile(const char *pathname, const char *dirname)
 {
-    size_t pathname_len = 0;
+    size_t pathname_length = 0;
 
-    if (!pathname || (pathname_len = strlen(pathname)) < 0)
+    if (!pathname || (pathname_length = strlen(pathname)) < 0)
     {
         errno = EINVAL;
         return -1;
@@ -202,22 +238,43 @@ int writeFile(const char *pathname, const char *dirname)
     if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
         return -1;
 
-    size_t request_len = REQ_CODE_LEN + MAX_SEG_LEN + pathname_len + 1 + MAX_SEG_LEN + file_len;
-    char *request = calloc(request_len, sizeof(char));
+    int op = WRITE_FILE;
+    
+    char *pathname_buf = calloc(++pathname_length, sizeof(char));
 
-    if (!request)
+    if (!pathname_buf)
         return -1;
 
-    snprintf(request, request_len, "%d%010ld%s%010ld", WRITE_FILE, pathname_len, pathname, file_len);
-    memcpy((request + strlen(request)), file_data_buf, file_len);
+    strncpy(pathname_buf, pathname, pathname_length);
 
-    if (writen(fd_skt, request, request_len - 1) == -1)
+    struct iovec request[5];
+
+    request[0].iov_base = &op;
+    request[0].iov_len = sizeof(op);
+
+    request[1].iov_base = &pathname_length;
+    request[1].iov_len = sizeof(pathname_length);
+
+    request[2].iov_base = pathname_buf;
+    request[2].iov_len = pathname_length;
+
+    request[3].iov_base = &file_len;
+    request[3].iov_len = sizeof(file_len);
+
+    request[4].iov_base = file_data_buf;
+    request[4].iov_len = file_len;
+    
+    if (writev(fd_skt, request, 5) == -1)
+    {
+        perror("writev");
         return -1;
+    }
 
+    free(pathname_buf);
     free(file_data_buf);
-    free(request);
 
     SERVER_RESPONSE(writeFile, pathname);
+
     PRINT_RDWR_BYTES(file_len, scritti);
     return errno ? -1 : 0;
 }
@@ -232,19 +289,34 @@ int closeFile(const char *pathname)
         return -1;
     }
 
-    size_t request_len = REQ_CODE_LEN + MAX_SEG_LEN + pathname_length + 1;
-    char *request = calloc(request_len, sizeof(char));
+    int op = CLOSE_FILE;
 
-    if (!request)
+    char *pathname_buf = calloc(++pathname_length, sizeof(char));
+
+    if (!pathname_buf)
         return -1;
 
-    snprintf(request, request_len, "%d%010ld%s", CLOSE_FILE, pathname_length, pathname);
+    strncpy(pathname_buf, pathname, pathname_length);
 
-    if (writen(fd_skt, request, request_len - 1) == -1)
+    struct iovec request[3];
+    
+    request[0].iov_base = &op;
+    request[0].iov_len = sizeof(op);
+
+    request[1].iov_base = &pathname_length;
+    request[1].iov_len = sizeof(pathname_length);
+
+    request[2].iov_base = pathname_buf;
+    request[2].iov_len = pathname_length;
+    
+    if (writev(fd_skt, request, 3) == -1)
+    {
+        perror("writev");
         return -1;
-
-    free(request);
-
+    }
+    
+    free(pathname_buf);
+    
     SERVER_RESPONSE(closeFile, pathname);
 
     return errno ? -1 : 0;

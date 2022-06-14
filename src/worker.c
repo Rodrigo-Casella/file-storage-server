@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/uio.h>
 
 #include "../include/message_protocol.h"
 #include "../include/utils.h"
@@ -11,12 +12,12 @@
     fprintf(stderr, "Errore in thread: %ld\n", pthread_self()); \
     pthread_exit((void *)EXIT_FAILURE);
 
-#define SEND_RESPONSE_CODE(fd, response_code)                           \
-    snprintf(response_code_buf, RES_CODE_LEN + 1, "%d", response_code); \
-    if (write(*client_fd, response_code_buf, RES_CODE_LEN) == -1)      \
-    {                                                                   \
-        perror("write");                                               \
-        THREAD_ERR_EXIT;                                                \
+#define SEND_RESPONSE_CODE(fd, code)                            \
+    response_code = code;                                       \
+    if (write(fd, &response_code, sizeof(response_code)) == -1) \
+    {                                                           \
+        perror("write");                                        \
+        THREAD_ERR_EXIT;                                        \
     }
 
 #define SEND_ERROR_CODE(fd)                  \
@@ -44,25 +45,44 @@
         break;                               \
     }
 
-static char *readSegment(int fd, long *data_size)
+static ssize_t readRequestHeader(int fd, int *request_code, size_t *request_len)
 {
-    char segment_len_buf[MAX_SEG_LEN + 1] = "";
-    long segment_len = 0;
+    struct iovec request_hdr[2];
+
+    request_hdr[0].iov_base = request_code;
+    request_hdr[0].iov_len = sizeof(int);
+
+    request_hdr[1].iov_base = request_len;
+    request_hdr[1].iov_len = sizeof(size_t);
+
+    return readv(fd, request_hdr, 2);
+}
+
+static char *readRequestPayload(int fd, size_t request_len)
+{
+    char *request_buf = NULL;
+
+    request_buf = calloc(request_len, sizeof(char));
+
+    if (!request_buf || readn(fd, request_buf, request_len) == -1)
+        return NULL;
+
+    return request_buf;
+}
+
+static char *readSegment(int fd, size_t *data_size)
+{
     char *segment_buf = NULL;
 
-    if (readn(fd, segment_len_buf, MAX_SEG_LEN) == -1)
-        return NULL;
+    size_t segment_len = 0;
 
-    if (isNumber(segment_len_buf, &segment_len) != 0)
-    {
-        errno = EBADE;
+    if (readn(fd, &segment_len, sizeof(size_t)) == -1)
         return NULL;
-    }
 
     if (data_size)
         *data_size = segment_len;
 
-    segment_buf = calloc(segment_len + 1, sizeof(char));
+    segment_buf = calloc(segment_len, sizeof(char));
 
     if (!segment_buf)
         return NULL;
@@ -86,57 +106,35 @@ void *processRequest(void *args)
         if (client_fd == EOS)
             break;
 
-        char request_code_buf[REQ_CODE_LEN + 1] = "",
-                                             pipe_buf[PIPE_BUF_LEN + 1] = "",
-                                             open_file_flag_buf[OPEN_FLAG_LEN + 1] = "",
-                                             response_code_buf[RES_CODE_LEN + 1] = "";
-
-        char *request_buf,
+        char *request_payload,
             *file_data_buf;
 
-        long request_code = 0,
-             open_file_flag = 0,
-             file_size = 0;
+        int request_code,
+            response_code,
+            open_file_flag;
 
-        if (read((*client_fd), request_code_buf, REQ_CODE_LEN) == 0)
+        size_t file_size = 0,
+               request_len = 0;
+
+        if (readRequestHeader(*client_fd, &request_code, &request_len) == -1)
         {
-            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
-            free(client_fd);
-            CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, CLIENT_LEFT_MSG, PIPE_BUF_LEN);
-
-            continue;
-        }
-
-        if (isNumber(request_code_buf, &request_code) != 0)
-        {
-            SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
-            continue;
-        }
-
-        request_buf = readSegment(*client_fd, NULL);
-
-        if (!request_buf)
-        {
+            perror("readv");
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
             continue;
         }
 
+        request_payload = readRequestPayload(*client_fd, request_len);
+
         switch (request_code)
         {
         case OPEN_FILE:
-            if (read(*client_fd, open_file_flag_buf, OPEN_FLAG_LEN) == -1)
+            if (readn(*client_fd, &open_file_flag, sizeof(int)) == -1)
             {
                 SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
                 break;
             }
 
-            if (isNumber(open_file_flag_buf, &open_file_flag) != 0)
-            {
-                SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
-                break;
-            }
-
-            if (openFileHandler(fs, request_buf, (int)open_file_flag, *client_fd) == -1)
+            if (openFileHandler(fs, request_payload, open_file_flag, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
@@ -145,6 +143,7 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
         case WRITE_FILE:
+
             file_data_buf = readSegment(*client_fd, &file_size);
 
             if (!file_data_buf)
@@ -153,7 +152,7 @@ void *processRequest(void *args)
                 break;
             }
 
-            if (writeFileHandler(fs, request_buf, file_data_buf, file_size, *client_fd) == -1)
+            if (writeFileHandler(fs, request_payload, file_data_buf, file_size, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
@@ -164,7 +163,7 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
         case CLOSE_FILE:
-            if (closeFileHandler(fs, request_buf, *client_fd) == -1)
+            if (closeFileHandler(fs, request_payload, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
@@ -172,13 +171,16 @@ void *processRequest(void *args)
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
+        case CLOSE_CONNECTION:
+            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
+            *client_fd = 0;
+            break;
         default:
             break;
         }
-        free(request_buf);
+        free(request_payload);
 
-        snprintf(pipe_buf, PIPE_BUF_LEN + 1, "%04d", *client_fd);
-        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, pipe_buf, PIPE_BUF_LEN);
+        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
         free(client_fd);
     }
 
