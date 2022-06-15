@@ -173,7 +173,7 @@ static inline int readn(long fd, void *buf, size_t size)
         left -= r;
         bufptr += r;
     }
-    return (size - left);
+    return 0;
 }
 
 static inline int writen(long fd, void *buf, size_t size)
@@ -194,7 +194,7 @@ static inline int writen(long fd, void *buf, size_t size)
         left -= r;
         bufptr += r;
     }
-    return (size - left);
+    return 0;
 }
 
 #endif

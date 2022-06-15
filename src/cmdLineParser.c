@@ -32,7 +32,7 @@ static Option *allocOption(char opt, char *arg)
     if (arg)
     {
         size_t argLength = strlen(arg) + 1;
-        newOption->arg = malloc(sizeof(char) * argLength);
+        newOption->arg = calloc(argLength, sizeof(char));
 
         if (!newOption->arg)
         {
@@ -41,6 +41,7 @@ static Option *allocOption(char opt, char *arg)
         }
 
         strncpy(newOption->arg, arg, argLength);
+        newOption->arg[strcspn(newOption->arg, "\n")] = '\0';
     }
 
     newOption->next = NULL;

@@ -12,15 +12,15 @@
     fprintf(stderr, "Errore in thread: %ld\n", pthread_self()); \
     pthread_exit((void *)EXIT_FAILURE);
 
-#define SEND_RESPONSE_CODE(fd, code)                                 \
-    if (1)                                                           \
-    {                                                                \
-        int response_code = code;                                    \
-        if (writen(fd, &response_code, sizeof(response_code)) == -1) \
-        {                                                            \
-            perror("write");                                         \
-            THREAD_ERR_EXIT;                                         \
-        }                                                            \
+#define SEND_RESPONSE_CODE(fd, code)                       \
+    if (1)                                                 \
+    {                                                      \
+        int response_code = code;                          \
+        if (writen(fd, &response_code, sizeof(int)) == -1) \
+        {                                                  \
+            perror("writen");                              \
+            THREAD_ERR_EXIT;                               \
+        }                                                  \
     }
 
 #define SEND_ERROR_CODE(fd)                  \
@@ -58,12 +58,12 @@ static ssize_t readRequestHeader(int fd, int *request_code, size_t *request_len)
     request_hdr[1].iov_base = request_len;
     request_hdr[1].iov_len = sizeof(size_t);
 
-    return readv(fd, request_hdr, 2);
+    return readv(fd, request_hdr, ARRAY_SIZE(request_hdr));
 }
 
 static char *readRequestPayload(int fd, size_t request_len)
 {
-    char *request_buf = NULL;
+    char *request_buf;
 
     request_buf = calloc(request_len, sizeof(char));
 
@@ -75,9 +75,9 @@ static char *readRequestPayload(int fd, size_t request_len)
 
 static char *readSegment(int fd, size_t *data_size)
 {
-    char *segment_buf = NULL;
+    char *segment_buf;
 
-    size_t segment_len = 0;
+    size_t segment_len;
 
     if (readn(fd, &segment_len, sizeof(size_t)) == -1)
         return NULL;
@@ -110,22 +110,29 @@ void *processRequest(void *args)
             break;
 
         char *request_payload,
-            *file_data_buf;
+            *file_data_buf = NULL;
 
         int request_code,
             open_file_flag;
 
-        size_t file_size = 0,
-               request_len = 0;
+        size_t file_size,
+               request_len;
 
         if (readRequestHeader(*client_fd, &request_code, &request_len) == -1)
         {
-            perror("readv");
+            perror("readRequestHeader");
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
             continue;
         }
 
         request_payload = readRequestPayload(*client_fd, request_len);
+
+        if (!request_payload)
+        {
+            perror("readRequestPayload");
+            SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
+            continue;
+        }
 
         switch (request_code)
         {
@@ -160,8 +167,6 @@ void *processRequest(void *args)
                 break;
             }
 
-            free(file_data_buf);
-
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
         case CLOSE_FILE:
@@ -180,7 +185,11 @@ void *processRequest(void *args)
         default:
             break;
         }
+        
         free(request_payload);
+
+        if(file_data_buf)
+            free(file_data_buf);
 
         CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
         free(client_fd);

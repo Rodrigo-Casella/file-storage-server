@@ -16,7 +16,7 @@
 #include "../include/message_protocol.h"
 #include "../include/utils.h"
 
-#define BUF_SIZE 1024
+#define CHUNK_SIZE 1024
 
 const char *responseMsg[] = {
     "Ok\n",
@@ -34,14 +34,16 @@ const char *responseMsg[] = {
 #define SERVER_RESPONSE(op, file)                                   \
     if (1)                                                          \
     {                                                               \
-        int response_code;                                          \
-        if (read(fd_skt, &response_code, sizeof(int)) == -1)        \
+        int response_code;                                      \
+        if (read(fd_skt, &response_code, sizeof(int)) == -1)    \
+        {                                                           \
+            PRINT_OP(op, file, INVALID_RES);                        \
             return -1;                                              \
-                                                                    \
+        }                                                           \
         if (response_code < SUCCESS || response_code > INVALID_RES) \
         {                                                           \
             PRINT_OP(op, file, INVALID_RES);                        \
-            errno = EINVAL;                                         \
+            errno = EBADE;                                          \
             return -1;                                              \
         }                                                           \
         if (toPrint)                                                \
@@ -60,13 +62,9 @@ int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
-static int readFileFromPath(const char *path, void **file_data, size_t *file_len)
+static int readFileFromPath(const char *path, char **file_data, size_t *file_len)
 {
     int file_fd;
-    char *buf;
-    char *file_data_ptr;
-    int bytes_read;
-    size_t bytes_copied;
 
     if ((file_fd = open(path, O_RDONLY)) == -1)
         return -1;
@@ -77,28 +75,37 @@ static int readFileFromPath(const char *path, void **file_data, size_t *file_len
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
         return -1;
 
-    *file_data = calloc((*file_len), 1);
+    *file_data = calloc((*file_len), sizeof(char));
 
-    size_t chunk_size = *file_len / BUF_SIZE;
-    buf = calloc(chunk_size, sizeof(char));
-
-    if (!(*file_data) || !buf)
+    if (!(*file_data))
         return -1;
 
-    file_data_ptr = (char *)*file_data;
-    bytes_copied = 0;
 
-    while (bytes_copied < (*file_len))
-    {
-        if ((bytes_read = readn(file_fd, buf, chunk_size)) == -1)
+    if (readn(file_fd, *file_data, *file_len) == -1)
             return -1;
-
-        memcpy(file_data_ptr + bytes_copied, buf, bytes_read);
-        bytes_copied += bytes_read;
-    }
 
     if (close(file_fd) == -1)
         return -1;
+
+    return 0;
+}
+
+static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
+{
+    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_CONNECTION) || !request_msg || *request_msg_len < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    request[0].iov_base = op;
+    request[0].iov_len = sizeof(int);
+
+    request[1].iov_base = request_msg_len;
+    request[1].iov_len = sizeof(size_t);
+
+    request[2].iov_base = request_msg;
+    request[2].iov_len = *request_msg_len;
 
     return 0;
 }
@@ -155,21 +162,15 @@ int closeConnection(const char *sockname)
     }
 
     int op = CLOSE_CONNECTION;
-    size_t left_msg_len = 1;
-    char left_msg[1] = "0";
+    char left_msg[] = "0";
+    size_t left_msg_len = ARRAY_SIZE(left_msg);
 
     struct iovec request[3];
 
-    request[0].iov_base = &op;
-    request[0].iov_len = sizeof(op);
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &left_msg_len, left_msg) == -1)
+        return -1;
 
-    request[1].iov_base = &left_msg_len;
-    request[1].iov_len = sizeof(left_msg_len);
-
-    request[2].iov_base = left_msg;
-    request[2].iov_len = left_msg_len;
-
-    if (writev(fd_skt, request, 3) == -1)
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
         return -1;
 
     SYSCALL_EQ_ACTION(close, -1, return -1, fd_skt);
@@ -182,36 +183,35 @@ int closeConnection(const char *sockname)
 
 int openFile(const char *pathname, int flags)
 {
-    size_t pathname_length;
+    char *pathname_buf;
 
-    if (!pathname || (pathname_length = strlen(pathname)) < 1)
+    int op;
+
+    size_t pathname_len;
+
+    struct iovec request[4];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1 || flags < 0)
     {
         errno = EINVAL;
         return -1;
     }
-    int op = OPEN_FILE;
-    char *pathname_buf = calloc(++pathname_length, sizeof(char)); // alloco memoria per la stringa + '\0'
+
+    op = OPEN_FILE;
+    pathname_buf = calloc(++pathname_len, sizeof(char)); // alloco memoria per la stringa + '\0'
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_length);
+    strncpy(pathname_buf, pathname, pathname_len);
 
-    struct iovec request[4];
-
-    request[0].iov_base = &op;
-    request[0].iov_len = sizeof(op);
-
-    request[1].iov_base = &pathname_length;
-    request[1].iov_len = sizeof(pathname_length);
-
-    request[2].iov_base = pathname_buf;
-    request[2].iov_len = pathname_length;
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+        return -1;
 
     request[3].iov_base = &flags;
-    request[3].iov_len = sizeof(flags);
+    request[3].iov_len = sizeof(int);
 
-    if (writev(fd_skt, request, 4) == -1)
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
         return -1;
 
     free(pathname_buf);
@@ -223,47 +223,44 @@ int openFile(const char *pathname, int flags)
 
 int writeFile(const char *pathname, const char *dirname)
 {
-    size_t pathname_length = 0;
+    char *pathname_buf,
+        *file_data_buf;
 
-    if (!pathname || (pathname_length = strlen(pathname)) < 0)
+    int op;
+
+    size_t pathname_len,
+        file_len;
+
+    struct iovec request[5];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 0)
     {
         errno = EINVAL;
         return -1;
     }
 
-    void *file_data_buf = NULL;
-    size_t file_len = 0;
+    op = WRITE_FILE;
 
-    if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
-        return -1;
-
-    int op = WRITE_FILE;
-
-    char *pathname_buf = calloc(++pathname_length, sizeof(char));
+    pathname_buf = calloc(++pathname_len, sizeof(char));
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_length);
+    strncpy(pathname_buf, pathname, pathname_len);
 
-    struct iovec request[5];
+    if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
+        return -1;
 
-    request[0].iov_base = &op;
-    request[0].iov_len = sizeof(op);
-
-    request[1].iov_base = &pathname_length;
-    request[1].iov_len = sizeof(pathname_length);
-
-    request[2].iov_base = pathname_buf;
-    request[2].iov_len = pathname_length;
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+        return -1;
 
     request[3].iov_base = &file_len;
-    request[3].iov_len = sizeof(file_len);
+    request[3].iov_len = sizeof(size_t);
 
     request[4].iov_base = file_data_buf;
     request[4].iov_len = file_len;
 
-    if (writev(fd_skt, request, 5) == -1)
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
     {
         perror("writev");
         return -1;
@@ -280,35 +277,33 @@ int writeFile(const char *pathname, const char *dirname)
 
 int closeFile(const char *pathname)
 {
-    size_t pathname_length;
+    char *pathname_buf;
 
-    if (!pathname || (pathname_length = strlen(pathname)) < 1)
+    int op;
+
+    size_t pathname_len;
+
+    struct iovec request[3];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
     {
         errno = EINVAL;
         return -1;
     }
 
-    int op = CLOSE_FILE;
+    op = CLOSE_FILE;
 
-    char *pathname_buf = calloc(++pathname_length, sizeof(char));
+    pathname_buf = calloc(++pathname_len, sizeof(char));
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_length);
+    strncpy(pathname_buf, pathname, pathname_len);
 
-    struct iovec request[3];
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+        return -1;
 
-    request[0].iov_base = &op;
-    request[0].iov_len = sizeof(op);
-
-    request[1].iov_base = &pathname_length;
-    request[1].iov_len = sizeof(pathname_length);
-
-    request[2].iov_base = pathname_buf;
-    request[2].iov_len = pathname_length;
-
-    if (writev(fd_skt, request, 3) == -1)
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
     {
         perror("writev");
         return -1;

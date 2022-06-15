@@ -169,7 +169,7 @@ int main(int argc, char const *argv[])
             {
                 if (fd == listen_fd) // richiesta di connessione
                 {
-                    int fd_client = 0; 
+                    int fd_client; 
                     SYSCALL_RET_EQ_ACTION(accept, -1, fd_client, continue, listen_fd, NULL, 0);
 
                     if (softQuit) {
