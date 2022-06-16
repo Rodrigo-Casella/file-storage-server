@@ -272,21 +272,11 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     LOCK(&(file->fileLock))
 
-    // il file è in stato di lock
-    if ((file->lockedBy && file->lockedBy != clientFd))
+    // il file è in stato di lock oppure il client non ha aperto il file
+    if ((file->lockedBy && file->lockedBy != clientFd) || !findNode(file->openedBy, clientFd))
     {
         UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
-        return -1;
-    }
-
-    // il client non ha aperto il file
-    if (!findNode(file->openedBy, clientFd))
-    {
-        UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
-        errno = EBADF;
         return -1;
     }
 
@@ -299,8 +289,8 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         return -1;
     }
 
-    // attendo finché non ci sono lettori per scrivere il file
-    while (file->nReaders > 0)
+    // attendo finché non ci sono lettori  o scrittori per scrivere il file
+    while (file->nReaders > 0 || file->isWritten)
     {
         WAIT(&(file->readWrite), &(file->fileLock));
     }
@@ -314,19 +304,15 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     while (fs->currMemory + dataSize > fs->maxMemory)
     {
         // TODO: Expell file from storage
+        break;
     }
 
     fileData = calloc((file->dataSize + dataSize), sizeof(*fileData));
 
     if (!fileData)
     {
-        LOCK(&(file->fileLock));
-        file->isWritten = 0;
-        UNLOCK(&(file->fileLock));
-
-        UNLOCK(&(fs->fileSystemLock));
-
-        return -1;
+        errno = ENOMEM;
+        goto cleanup;
     }
 
     // se il file ha già dei dati copio questi ultimi prima di copiare i dati nuovi
@@ -341,13 +327,86 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     file->data = fileData;
     file->dataSize += dataSize;
 
+    cleanup:
     LOCK(&(file->fileLock));
 
     file->isWritten = 0;
 
+    BCAST(&(file->readWrite));
+
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));
-    return 0;
+    return errno ? -1 : 0;
+}
+
+int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *dataSize, int clientFd)
+{
+    if (!fs || !path || (clientFd <= 0))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    LOCK(&(fs->fileSystemLock));
+
+    File *file = (File *)icl_hash_find(fs->hastTable, (void *)path);
+
+    // il file che voglio leggere non esiste
+    if (!file)
+    {
+        UNLOCK(&(fs->fileSystemLock));
+        errno = ENOENT;
+        return -1;
+    }
+
+    LOCK(&(file->fileLock))
+
+    UNLOCK(&(fs->fileSystemLock));
+
+    // il file è in stato di lock oppure il client non ha aperto il file
+    if ((file->lockedBy && file->lockedBy != clientFd) || !findNode(file->openedBy, clientFd))
+    {
+        UNLOCK(&(file->fileLock));
+        errno = EACCES;
+        return -1;
+    }
+
+    // attendo finché non ci sono scrittori
+    while (file->isWritten)
+    {
+        WAIT(&(file->readWrite), &(file->fileLock));
+    }
+
+    file->nReaders++;
+
+    UNLOCK(&(file->fileLock));
+
+    *data_buf = calloc(file->dataSize, sizeof(char));
+
+    if (!(*data_buf))
+    {
+        errno = ENOMEM;
+        goto cleanup;
+    }
+
+    memcpy(*data_buf, file->data, file->dataSize);
+
+    *dataSize = file->dataSize;
+
+    cleanup:
+
+    LOCK(&(file->fileLock))
+
+    if(!file->nReaders)
+    {
+        SIGNAL(&(file->readWrite));
+    }
+
+    file->nReaders--;
+
+    UNLOCK(&(file->fileLock));
+
+    return errno ? -1 : 0;
 }
 
 int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
@@ -393,23 +452,4 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
     UNLOCK(&(fs->fileSystemLock));
 
     return 0;
-}
-
-void addDummyFiles(Filesystem *fs)
-{
-    char buf[10];
-
-    LOCK(&(fs->fileSystemLock));
-
-    for (size_t i = 0; i < 10; i++)
-    {
-
-        snprintf(buf, 10, "file%ld", fs->currFiles++);
-        File *newFile = initFile(buf);
-
-        printf("Thread: %ld adding file: %s\n", pthread_self(), newFile->path);
-        addFile(fs, newFile);
-    }
-
-    UNLOCK(&(fs->fileSystemLock));
 }

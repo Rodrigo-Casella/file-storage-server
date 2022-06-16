@@ -62,32 +62,79 @@ int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
-static int readFileFromPath(const char *path, char **file_data, size_t *file_len)
+static char *readFileFromPath(const char *path, size_t *file_len)
 {
-    int file_fd;
+    char *file_data;
+
+    int file_fd,
+        errnosave;
 
     if ((file_fd = open(path, O_RDONLY)) == -1)
-        return -1;
+        return NULL;
 
     if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
-        return -1;
+    {
+        errnosave = errno;
+        close(file_fd);
+        errno = errnosave;
+        return NULL;
+    }
 
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
-        return -1;
+    {
+        errnosave = errno;
+        close(file_fd);
+        errno = errnosave;
+        return NULL;
+    }
 
-    *file_data = calloc((*file_len), sizeof(char));
+    file_data = calloc((*file_len), sizeof(char));
 
-    if (!(*file_data))
-        return -1;
+    if (!file_data)
+    {
+        errnosave = ENOMEM;
+        close(file_fd);
+        errno = errnosave;
+        return NULL;
+    }
 
-
-    if (readn(file_fd, *file_data, *file_len) == -1)
-            return -1;
-
+    if (readn(file_fd, file_data, *file_len) == -1)
+    {
+        errnosave = errno;
+        close(file_fd);
+        errno = errnosave;
+        free(file_data);
+        return NULL;
+    }
+        
     if (close(file_fd) == -1)
-        return -1;
+        return NULL;
 
-    return 0;
+    return file_data;
+}
+
+static char *readFileFromServer(size_t *file_len)
+{
+    char *file_data;
+
+    if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
+        return NULL;
+
+    file_data = calloc(*file_len, sizeof(char));
+
+    if(!file_data)
+    {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    if (readn(fd_skt, file_data, *file_len) == -1)
+    {
+        free(file_data);
+        return NULL;
+    }
+
+    return file_data;
 }
 
 static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
@@ -155,17 +202,20 @@ int openConnection(const char *sockname, int msec, const struct timespec abstime
 
 int closeConnection(const char *sockname)
 {
+    int op = CLOSE_CONNECTION;
+
+    char left_msg[] = "0";
+    size_t left_msg_len = ARRAY_SIZE(left_msg);
+
+    struct iovec request[3];
+
     if (!sockname || strncmp(sockname, server_addr_path, UNIX_PATH_MAX) != 0)
     {
         errno = EINVAL;
         return -1;
     }
 
-    int op = CLOSE_CONNECTION;
-    char left_msg[] = "0";
-    size_t left_msg_len = ARRAY_SIZE(left_msg);
-
-    struct iovec request[3];
+    memset(request, 0, sizeof(request));
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &left_msg_len, left_msg) == -1)
         return -1;
@@ -183,9 +233,9 @@ int closeConnection(const char *sockname)
 
 int openFile(const char *pathname, int flags)
 {
-    char *pathname_buf;
+    int op = OPEN_FILE;
 
-    int op;
+    char *pathname_buf;
 
     size_t pathname_len;
 
@@ -197,13 +247,12 @@ int openFile(const char *pathname, int flags)
         return -1;
     }
 
-    op = OPEN_FILE;
-    pathname_buf = calloc(++pathname_len, sizeof(char)); // alloco memoria per la stringa + '\0'
+    pathname_buf = strndup(pathname, pathname_len++);
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_len);
+    memset(request, 0, sizeof(request));
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
         return -1;
@@ -223,33 +272,33 @@ int openFile(const char *pathname, int flags)
 
 int writeFile(const char *pathname, const char *dirname)
 {
+    int op = WRITE_FILE;
+
     char *pathname_buf,
         *file_data_buf;
-
-    int op;
 
     size_t pathname_len,
         file_len;
 
     struct iovec request[5];
 
-    if (!pathname || (pathname_len = strlen(pathname)) < 0)
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
     {
         errno = EINVAL;
         return -1;
     }
 
-    op = WRITE_FILE;
-
-    pathname_buf = calloc(++pathname_len, sizeof(char));
+    pathname_buf = strndup(pathname, pathname_len++);
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_len);
+    file_data_buf = readFileFromPath(pathname, &file_len);
 
-    if (readFileFromPath(pathname, &file_data_buf, &file_len) == -1)
+    if (!file_data_buf)
         return -1;
+
+    memset(request, 0, sizeof(request));
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
         return -1;
@@ -275,11 +324,11 @@ int writeFile(const char *pathname, const char *dirname)
     return errno ? -1 : 0;
 }
 
-int closeFile(const char *pathname)
+int readFile(const char* pathname, void** buf, size_t* size)
 {
-    char *pathname_buf;
+    int op = READ_FILE;
 
-    int op;
+    char *pathname_buf;
 
     size_t pathname_len;
 
@@ -291,14 +340,58 @@ int closeFile(const char *pathname)
         return -1;
     }
 
-    op = CLOSE_FILE;
-
-    pathname_buf = calloc(++pathname_len, sizeof(char));
+    pathname_buf = strndup(pathname, pathname_len++);
 
     if (!pathname_buf)
         return -1;
 
-    strncpy(pathname_buf, pathname, pathname_len);
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+        return -1;
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+        return -1;
+
+    free(pathname_buf);
+    
+    SERVER_RESPONSE(readFile, pathname);
+
+    if (!errno)
+    {
+        *buf = readFileFromServer(size);
+
+        if (!(*buf))
+            return -1;
+
+        PRINT_RDWR_BYTES(*size, letti);
+    }  
+
+    return errno ? -1 : 0;
+}
+
+int closeFile(const char *pathname)
+{
+    int op = CLOSE_FILE;
+
+    char *pathname_buf;
+
+    size_t pathname_len;
+
+    struct iovec request[3];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    pathname_buf = strndup(pathname, pathname_len++);
+
+    if (!pathname_buf)
+        return -1;
+
+    memset(request, 0, sizeof(request));
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
         return -1;

@@ -1,21 +1,21 @@
 #include "../include/define_source.h"
 
+#include <dirent.h>
+#include <errno.h>
+#include <linux/limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <time.h>
-#include <math.h>
-#include <sys/types.h>
-#include <dirent.h>
-#include <linux/limits.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
+#include "../include/api.h"
 #include "../include/cmdLineParser.h"
 #include "../include/definitions.h"
 #include "../include/utils.h"
-#include "../include/api.h"
 
 #define HELP_MSG                                                                                                                        \
     "Uso: %s -f <socketfile> [OPTIONS]\n"                                                                                               \
@@ -68,24 +68,30 @@
 
 char *realpath(const char *path, char *resolved_path);
 
-int writeFileHandler(char *file_path)
+/**
+ * @brief Effetua le chiamate alle api di openFile, writeFile, closeFile su file_path e sulla cartella di salvataggio save_dir (opzionale).
+ *
+ * @param file_path path del file su cui chiamare le api.
+ * @param save_dir cartella di salvataggio opzionale.
+ * @return 0 se successo, -1 altrimeni e errno settato.
+ */
+int writeFileHandler(char *file_path, char *save_dir)
 {
     char resolved_path[PATH_MAX];
-    SYSCALL_EQ_ACTION(realpath, NULL, fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
-    
+    CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
+
     if (openFile(resolved_path, O_CREATE | O_LOCK) == -1)
     {
         perror("openFile");
         return -1;
     }
-        
 
-    if (writeFile(resolved_path, NULL) == -1)
+    if (writeFile(resolved_path, save_dir) == -1)
     {
         perror("writeFile");
         return -1;
     }
-    
+
     if (closeFile(resolved_path) == -1)
     {
         perror("closeFile");
@@ -94,9 +100,47 @@ int writeFileHandler(char *file_path)
     return 0;
 }
 
-int readFileHandler(char *file)
+/**
+ * @brief Effetua le chiamate alle api di openFile, readFile, closeFile su file_path e salva il file letto nella cartella di salvataggio save_dir (opzionale).
+ *
+ * @param file_path path del file su cui chiamare le api.
+ * @param save_dir cartella di salvataggio opzionale.
+ * @return 0 se successo, -1 altrimeni e errno settato.
+ */
+int readFileHandler(char *file_path, char *save_dir)
 {
-    printf("leggendo: %s\n", file);
+    char resolved_path[PATH_MAX];
+
+    char *buf;
+
+    size_t size;
+
+    CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
+
+    if (openFile(resolved_path, 0) == -1)
+    {
+        perror("openFile");
+        return -1;
+    }
+
+    if (readFile(resolved_path, (void **)&buf, &size) == -1)
+    {
+        perror("readFile");
+        return -1;
+    }
+
+    if(save_dir)
+    {
+        printf("Salvo il file su %s\n", save_dir);
+    }
+
+    free(buf);
+
+    if (closeFile(resolved_path) == -1)
+    {
+        perror("closeFile");
+        return -1;
+    }
     return 0;
 }
 
@@ -129,7 +173,7 @@ int writeDirHandler(char const *dirToWrite, char const *dirToSave, long const fi
         }
         else
         {
-            CHECK_AND_ACTION(writeFileHandler, ==, -1, return -1, entry->d_name);
+            CHECK_AND_ACTION(writeFileHandler, ==, -1, return -1, entry->d_name, NULL);
             (*filesWritten)++;
         }
     }
@@ -145,17 +189,36 @@ int writeDirHandler(char const *dirToWrite, char const *dirToSave, long const fi
     return 0;
 }
 
-void callApiOnToken(char *string, char *const del, int (*apiHandler)(char *))
+/**
+ * @brief Chiama gli handler delle operazioni di scrittura o lettura su una stringa di file separati da un delimitatore e, se presente, su una cartella di salvataggio
+ *
+ * @param file_list stringa composta da i nomi dei file separati da un delimitatore
+ * @param save_dir cartella di salvataggio opzionale
+ * @param del demilimitatore che separa i nomi dei file
+ * @param apiHandler handler dell'api da chiamare
+ * 
+ * @return 0 se successo, -1 altrimenti e errno settato
+ */
+int callReadWriteOnList(char *file_list, char *save_dir, const char * delim, int (*apiHandler)(char *, char *))
 {
-    char *token, *savePtr;
-
-    token = strtok_r(string, del, &savePtr);
-
-    while (token != NULL)
+    if (!file_list || !delim)
     {
-        apiHandler(token);
-        token = strtok_r(NULL, del, &savePtr);
+        errno = EINVAL;
+        return -1;
     }
+
+    char *token,
+        *savePtr;
+
+    token = strtok_r(file_list, delim, &savePtr);
+
+    while (token)
+    {
+        apiHandler(token, save_dir);
+        token = strtok_r(NULL, delim, &savePtr);
+    }
+
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -205,10 +268,9 @@ int main(int argc, char *argv[])
     }
 
     int msec = RETRY_TIME_MSEC;
-    struct timespec abstime = { .tv_sec = time(NULL) + MAX_RETRY_TIME_SEC, .tv_nsec = 0};
+    struct timespec abstime = {.tv_sec = time(NULL) + MAX_RETRY_TIME_SEC, .tv_nsec = 0};
 
-    printf("Connessione a %s in corso\n", sockname);
-    CHECK_AND_ACTION(openConnection, ==, -1, perror("openConnection");free(sockname);FREE_AND_EXIT(list, NULL, EXIT_FAILURE), sockname, msec, abstime);
+    CHECK_AND_ACTION(openConnection, ==, -1, perror("openConnection"); free(sockname); FREE_AND_EXIT(list, NULL, EXIT_FAILURE), sockname, msec, abstime);
 
     selectedOption = list->head;
     int skipOption = 0;
@@ -239,7 +301,8 @@ int main(int argc, char *argv[])
         case 'W':;
             CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
-            callApiOnToken(selectedOption->arg, ",", writeFileHandler);
+            if (callReadWriteOnList(selectedOption->arg, saveDir, ",", writeFileHandler) == -1)
+                perror("callReadWriteOnList");
 
             if (saveDir)
                 free(saveDir);
@@ -250,7 +313,8 @@ int main(int argc, char *argv[])
         case 'r':;
             CHECK_SAVE_DIR(selectedOption->next, 'd', saveDir);
 
-            callApiOnToken(selectedOption->arg, ",", readFileHandler);
+            if (callReadWriteOnList(selectedOption->arg, saveDir, ",", readFileHandler) == -1)
+                perror("callReadWriteOnList");
 
             if (saveDir)
                 free(saveDir);

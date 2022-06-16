@@ -52,6 +52,8 @@ static ssize_t readRequestHeader(int fd, int *request_code, size_t *request_len)
 {
     struct iovec request_hdr[2];
 
+    memset(request_hdr, 0, sizeof(request_hdr));
+
     request_hdr[0].iov_base = request_code;
     request_hdr[0].iov_len = sizeof(int);
 
@@ -94,6 +96,21 @@ static char *readSegment(int fd, size_t *data_size)
         return NULL;
 
     return segment_buf;
+}
+
+static int writeSegment(int fd, char **data_buf, size_t *data_size)
+{
+    struct iovec segment[2];
+
+    memset(segment, 0, sizeof(segment));
+    
+    segment[0].iov_base = data_size;
+    segment[0].iov_len = sizeof(size_t);
+
+    segment[1].iov_base = *data_buf;
+    segment[1].iov_len = *data_size;
+
+    return writev(fd, segment, ARRAY_SIZE(segment));
 }
 
 void *processRequest(void *args)
@@ -169,6 +186,21 @@ void *processRequest(void *args)
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
+        case READ_FILE:
+            if (readFileHandler(fs, request_payload, (void **)&file_data_buf, &file_size, *client_fd) == -1)
+            {
+                SEND_ERROR_CODE(*client_fd);
+                break;
+            }
+
+             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
+
+            if (writeSegment(*client_fd, &file_data_buf, &file_size) == -1)
+            {
+                fprintf(stderr, "Errore inviando file al client\n");
+            }
+
+            break;
         case CLOSE_FILE:
             if (closeFileHandler(fs, request_payload, *client_fd) == -1)
             {
@@ -180,7 +212,7 @@ void *processRequest(void *args)
             break;
         case CLOSE_CONNECTION:
             SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
-            *client_fd = 0;
+            *client_fd = 0; // segnalo al thread manager che un client si e' disconesso
             break;
         default:
             break;

@@ -79,6 +79,20 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
 int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, int clientFd);
 
 /**
+ * @brief Legge un file dal filesystem
+ * 
+ * @param fs puntatore al filesystem
+ * @param path path del file da leggere
+ * @param data_buf buffer su cui scrivere il file
+ * @param dataSize dimensione del file letto
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ * 
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *dataSize, int clientFd);
+
+/**
  * @brief chiude un file del filesystem.
  *
  * @param fs puntatore al filesystem
