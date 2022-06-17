@@ -126,20 +126,28 @@ void *processRequest(void *args)
         if (client_fd == EOS)
             break;
 
-        char *request_payload,
+        char *request_payload = NULL,
             *file_data_buf = NULL;
 
-        int request_code,
-            open_file_flag;
+        int request_code = 0,
+            open_file_flag = 0;
 
-        size_t file_size,
-               request_len;
+        size_t file_size = 0,
+               request_len = 0;
 
         if (readRequestHeader(*client_fd, &request_code, &request_len) == -1)
         {
             perror("readRequestHeader");
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
             continue;
+        }
+        
+        if (!request_code) // Se request_code == 0 vuol dire che il client ha terminato di inviare richieste
+        {
+            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
+            *client_fd = 0;
+            CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
+            free(client_fd);
         }
 
         request_payload = readRequestPayload(*client_fd, request_len);
@@ -169,6 +177,12 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
         case WRITE_FILE:
+            if (canWrite(fs, request_payload, *client_fd) == 0)
+            {
+                SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
+                break;
+            }
+        case APPEND_FILE:
 
             file_data_buf = readSegment(*client_fd, &file_size);
 
@@ -210,15 +224,13 @@ void *processRequest(void *args)
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
             break;
-        case CLOSE_CONNECTION:
-            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
-            *client_fd = 0; // segnalo al thread manager che un client si e' disconesso
-            break;
         default:
+            SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
             break;
         }
         
-        free(request_payload);
+        if (request_payload)
+            free(request_payload);
 
         if(file_data_buf)
             free(file_data_buf);

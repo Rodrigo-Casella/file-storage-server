@@ -103,5 +103,16 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
  * \retval -1 se errore (errno settato opportunatamente)
  */
 int closeFileHandler(Filesystem *fs, const char *path, int clientFd);
-void addDummyFiles(Filesystem *fs);
+
+/**
+ * @brief Verifica che il client che ha richiesto una writeFile abbia precedentemente effettuato una openFile con i flag O_CREATE O_LOCK
+ * 
+ * @param fs puntatore al filesystem
+ * @param path path del file
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ * 
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int canWrite(Filesystem *fs, const char *path, int clientFd);
 #endif

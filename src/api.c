@@ -86,7 +86,8 @@ static char *readFileFromPath(const char *path, size_t *file_len)
         goto cleanup;
     }
 
-    readn(file_fd, file_data, *file_len);
+    if (readn(file_fd, file_data, *file_len) == -1)
+        free(file_data);
 
     cleanup:
     errnosave = errno;
@@ -94,9 +95,6 @@ static char *readFileFromPath(const char *path, size_t *file_len)
     close(file_fd);
     
     errno = errnosave;
-
-    if (file_data)
-        free(file_data);
 
     return errno ? NULL : file_data;
 }
@@ -106,28 +104,25 @@ static char *readFileFromServer(size_t *file_len)
     char *file_data;
 
     if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
-        goto cleanup;
+        return NULL;
 
     file_data = calloc(*file_len, sizeof(char));
 
     if(!file_data)
     {
         errno = ENOMEM;
-        goto cleanup;
+        free(file_data);
+        return NULL;
     }
 
     readn(fd_skt, file_data, *file_len);
-
-    cleanup:
-    if (file_data)
-        free(file_data);
 
     return errno ? NULL : file_data;
 }
 
 static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
 {
-    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_CONNECTION) || !request_msg || *request_msg_len < 1)
+    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_FILE) || !request_msg || *request_msg_len < 1)
     {
         errno = EINVAL;
         return -1;
@@ -190,26 +185,11 @@ int openConnection(const char *sockname, int msec, const struct timespec abstime
 
 int closeConnection(const char *sockname)
 {
-    int op = CLOSE_CONNECTION;
-
-    char left_msg[] = "0";
-    size_t left_msg_len = ARRAY_SIZE(left_msg);
-
-    struct iovec request[3];
-
     if (!sockname || strncmp(sockname, server_addr_path, UNIX_PATH_MAX) != 0)
     {
         errno = EINVAL;
         return -1;
     }
-
-    memset(request, 0, sizeof(request));
-
-    if (buildRequest(request, ARRAY_SIZE(request), &op, &left_msg_len, left_msg) == -1)
-        return -1;
-
-    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
-        return -1;
 
     SYSCALL_EQ_ACTION(close, -1, return -1, fd_skt);
 

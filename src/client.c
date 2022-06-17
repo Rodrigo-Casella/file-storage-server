@@ -78,6 +78,13 @@ char *realpath(const char *path, char *resolved_path);
 int writeFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
+
+    if (!file_path)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
     CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
 
     if (openFile(resolved_path, O_CREATE | O_LOCK) == -1)
@@ -115,6 +122,12 @@ int readFileHandler(const char *file_path, const char *save_dir)
 
     size_t size;
 
+    if (!file_path)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
     CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
 
     if (openFile(resolved_path, 0) == -1)
@@ -150,12 +163,10 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
     struct dirent *entry;
     struct stat info;
     char *currPath = NULL;
-    int errnosave = 0;
 
     SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, return -1, dirToWrite);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
-    errno = 0;
     while ((entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
     {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
@@ -174,28 +185,30 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
         strcat(currPath, entry->d_name);
 
         if (stat(currPath, &info) == -1)
-            break;
+            perror("stat");
 
         if (S_ISDIR(info.st_mode))
         {
             if (writeDirHandler(currPath, dirToSave, filesToWrite, filesWritten) == -1)
-                break;
-
-            continue;
+                return -1;
         }
-       
-        if (writeFileHandler(currPath, dirToSave) == -1)
-            break;
+        else
+        {
+            if (writeFileHandler(currPath, dirToSave) == -1)
+            {
+                free(currPath);
+                return -1;
+            }
         
-        (*filesWritten)++;
-    }
-    
-    if (currPath)
+            (*filesWritten)++;
+        }
+
         free(currPath);
+    }
 
     SYSCALL_EQ_RETURN(closedir, -1, dir);
 
-    return errno ? -1 : 0;
+    return 0;
 }
 
 /**

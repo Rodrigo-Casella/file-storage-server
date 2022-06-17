@@ -453,3 +453,35 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
 
     return 0;
 }
+
+int canWrite(Filesystem *fs, const char *path, int clientFd)
+{
+    int canWrite;
+
+    if (!fs || !path || (clientFd <= 0))
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    LOCK(&(fs->fileSystemLock));
+
+    File *file = (File *)icl_hash_find(fs->hastTable, (void *)path);
+
+    // il file non esiste
+    if (!file)
+    {
+        UNLOCK(&(fs->fileSystemLock));
+        errno = ENOENT;
+        return -1;
+    }
+
+    LOCK(&(file->fileLock));
+
+    canWrite = (file->lockedBy == clientFd && findNode(file->openedBy, clientFd));
+
+    UNLOCK(&(file->fileLock));
+    UNLOCK(&(fs->fileSystemLock));
+
+    return canWrite;
+}
