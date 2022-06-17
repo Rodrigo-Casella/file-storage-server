@@ -75,7 +75,7 @@ char *realpath(const char *path, char *resolved_path);
  * @param save_dir cartella di salvataggio opzionale.
  * @return 0 se successo, -1 altrimeni e errno settato.
  */
-int writeFileHandler(char *file_path, char *save_dir)
+int writeFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
     CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", file_path); return -1, file_path, resolved_path);
@@ -107,7 +107,7 @@ int writeFileHandler(char *file_path, char *save_dir)
  * @param save_dir cartella di salvataggio opzionale.
  * @return 0 se successo, -1 altrimeni e errno settato.
  */
-int readFileHandler(char *file_path, char *save_dir)
+int readFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
 
@@ -144,49 +144,58 @@ int readFileHandler(char *file_path, char *save_dir)
     return 0;
 }
 
-int writeDirHandler(char const *dirToWrite, char const *dirToSave, long const filesToWrite, int *filesWritten)
+int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToWrite, int *filesWritten)
 {
     DIR *dir;
     struct dirent *entry;
+    struct stat info;
+    char *currPath = NULL;
+    int errnosave = 0;
 
-    char cwd[PATH_MAX];
-    SYSCALL_EQ_RETURN(getcwd, NULL, cwd, PATH_MAX);
-
-    SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, fprintf(stderr, "Errore aprendo directory: %s.\n", dirToWrite); return -1, dirToWrite);
-
-    SYSCALL_EQ_RETURN(chdir, -1, dirToWrite);
+    SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, return -1, dirToWrite);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
-    while ((errno = 0, entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
+    errno = 0;
+    while ((entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
     {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
 
-        struct stat info;
+        currPath = calloc(strlen(dirToWrite) + strlen(entry->d_name) + 2, sizeof(char));
 
-        if (stat(entry->d_name, &info))
-            continue;
+        if (!currPath)
+        {
+            errno = ENOMEM;
+            break;
+        }
+
+        strcpy(currPath, dirToWrite);
+        strcat(currPath, "/");
+        strcat(currPath, entry->d_name);
+
+        if (stat(currPath, &info) == -1)
+            break;
 
         if (S_ISDIR(info.st_mode))
         {
-            writeDirHandler(entry->d_name, dirToSave, filesToWrite, filesWritten);
+            if (writeDirHandler(currPath, dirToSave, filesToWrite, filesWritten) == -1)
+                break;
+
+            continue;
         }
-        else
-        {
-            CHECK_AND_ACTION(writeFileHandler, ==, -1, return -1, entry->d_name, NULL);
-            (*filesWritten)++;
-        }
+       
+        if (writeFileHandler(currPath, dirToSave) == -1)
+            break;
+        
+        (*filesWritten)++;
     }
-    if (errno)
-    {
-        perror("readdir");
-        SYSCALL_EQ_RETURN(closedir, -1, dir);
-        return -1;
-    }
+    
+    if (currPath)
+        free(currPath);
+
     SYSCALL_EQ_RETURN(closedir, -1, dir);
 
-    SYSCALL_EQ_RETURN(chdir, -1, cwd);
-    return 0;
+    return errno ? -1 : 0;
 }
 
 /**
@@ -199,7 +208,7 @@ int writeDirHandler(char const *dirToWrite, char const *dirToSave, long const fi
  * 
  * @return 0 se successo, -1 altrimenti e errno settato
  */
-int callReadWriteOnList(char *file_list, char *save_dir, const char * delim, int (*apiHandler)(char *, char *))
+int callReadWriteOnList(char *file_list, char *save_dir, const char * delim, int (*apiHandler)(const char *, const char *))
 {
     if (!file_list || !delim)
     {

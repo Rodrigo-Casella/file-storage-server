@@ -64,7 +64,7 @@ char server_addr_path[UNIX_PATH_MAX];
 
 static char *readFileFromPath(const char *path, size_t *file_len)
 {
-    char *file_data;
+    char *file_data = NULL;
 
     int file_fd,
         errnosave;
@@ -73,44 +73,32 @@ static char *readFileFromPath(const char *path, size_t *file_len)
         return NULL;
 
     if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
-    {
-        errnosave = errno;
-        close(file_fd);
-        errno = errnosave;
-        return NULL;
-    }
+        goto cleanup;
 
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
-    {
-        errnosave = errno;
-        close(file_fd);
-        errno = errnosave;
-        return NULL;
-    }
+        goto cleanup;
 
     file_data = calloc((*file_len), sizeof(char));
 
     if (!file_data)
     {
-        errnosave = ENOMEM;
-        close(file_fd);
-        errno = errnosave;
-        return NULL;
+        errno = ENOMEM;
+        goto cleanup;
     }
 
-    if (readn(file_fd, file_data, *file_len) == -1)
-    {
-        errnosave = errno;
-        close(file_fd);
-        errno = errnosave;
+    readn(file_fd, file_data, *file_len);
+
+    cleanup:
+    errnosave = errno;
+
+    close(file_fd);
+    
+    errno = errnosave;
+
+    if (file_data)
         free(file_data);
-        return NULL;
-    }
-        
-    if (close(file_fd) == -1)
-        return NULL;
 
-    return file_data;
+    return errno ? NULL : file_data;
 }
 
 static char *readFileFromServer(size_t *file_len)
@@ -118,23 +106,23 @@ static char *readFileFromServer(size_t *file_len)
     char *file_data;
 
     if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
-        return NULL;
+        goto cleanup;
 
     file_data = calloc(*file_len, sizeof(char));
 
     if(!file_data)
     {
         errno = ENOMEM;
-        return NULL;
+        goto cleanup;
     }
 
-    if (readn(fd_skt, file_data, *file_len) == -1)
-    {
+    readn(fd_skt, file_data, *file_len);
+
+    cleanup:
+    if (file_data)
         free(file_data);
-        return NULL;
-    }
 
-    return file_data;
+    return errno ? NULL : file_data;
 }
 
 static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
