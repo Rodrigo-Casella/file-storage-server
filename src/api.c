@@ -62,39 +62,156 @@ int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
+/**
+ * @brief Rimuove la sottostringa 'sub' dalla stringa 'str'.
+ * 
+ * @param str stringa originale
+ * @param sub sotto-stringa da rimuovere
+ * @return la stringa orginiale meno la sottostringa
+ */
+char* strremove(char* str, const char* sub) {
+    char* p, * q, * r;
+    if ((q = r = strstr(str, sub)) != NULL) {
+        size_t len = strlen(sub);
+        while ((r = strstr(p = r + len, sub)) != NULL) {
+            while (p < r)
+                *q++ = *p++;
+        }
+        while ((*q++ = *p++) != '\0')
+            continue;
+    }
+    return str;
+}
+
+/**
+ * @brief Crea ricorsivamente cartelle
+ * 
+ * @note Adattato da https://nachtimwald.com/2019/07/10/recursive-create-directory-in-c-revisited/
+ * 
+ * @param dir pathname completo da creare
+ * @return 0 se successo, -1 altrimenti e ernno settato
+ */
+static int recursive_mkdir(const char *dir) {
+    char *tmp;
+    const char *dirPtr;
+    size_t len;
+
+    if (!dir)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+    
+    len = strlen(dir) + 1;
+    
+    tmp = calloc(len, sizeof(char));
+
+    if (!tmp)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+    
+    dirPtr = dir;
+
+    while((errno = 0, dirPtr = strchr(dirPtr, '/')) != NULL)
+    {
+        if (dirPtr == dir && *dirPtr == '/')
+        {
+            dirPtr++;
+            continue;
+        }
+
+        memcpy(tmp, dir, dirPtr - dir);
+        tmp[dirPtr - dir] = '\0';
+        dirPtr++;
+
+        puts(tmp);
+
+        if (mkdir(tmp, S_IRWXU) == -1 && errno != EEXIST)
+            break;
+    }
+
+    free(tmp);
+
+    mkdir(dir, S_IRWXU);
+
+    errno = errno != EEXIST ? errno : 0;
+
+    return errno ? -1 : 0;
+}
+
+int writeFileToDisk(char *path, void *buf, size_t size)
+{
+    char *lastDir;
+    
+    int file_fd;
+
+    if (!path || !buf || size < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    //path = strremove(path, "../");
+
+    lastDir = strrchr(path, '/'); //path meno le cartelle fino al filename
+
+    if (lastDir)
+    {
+        *lastDir = '\0'; //escludo il filename dal path per creare ricorsivamente le cartelle di cui ho bisogno
+        if (recursive_mkdir(path) == -1)
+            return -1;
+
+        *lastDir = '/';
+    }
+
+    if ((file_fd = open(path, O_WRONLY | O_CREAT, S_IRWXU)) == -1)
+        return -1;
+
+    if (writen(file_fd, buf, size) == -1)
+    {
+        SAVE_ERRNO_AND_RETURN(close(file_fd), -1);
+    }
+
+    close(file_fd);
+
+    return errno ? -1 : 0;
+}
+
 static char *readFileFromPath(const char *path, size_t *file_len)
 {
     char *file_data = NULL;
 
-    int file_fd,
-        errnosave;
+    int file_fd;
 
     if ((file_fd = open(path, O_RDONLY)) == -1)
         return NULL;
 
     if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
-        goto cleanup;
+    {
+        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
+    }
 
     if (lseek(file_fd, 0L, SEEK_SET) == -1)
-        goto cleanup;
+    {
+        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
+    }
 
     file_data = calloc((*file_len), sizeof(char));
 
     if (!file_data)
     {
         errno = ENOMEM;
-        goto cleanup;
+        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
     }
 
     if (readn(file_fd, file_data, *file_len) == -1)
-        free(file_data);
-
-    cleanup:
-    errnosave = errno;
+    {
+        SAVE_ERRNO_AND_RETURN(close(file_fd); free(file_data), NULL);
+    }
 
     close(file_fd);
-    
-    errno = errnosave;
 
     return errno ? NULL : file_data;
 }
@@ -111,11 +228,11 @@ static char *readFileFromServer(size_t *file_len)
     if(!file_data)
     {
         errno = ENOMEM;
-        free(file_data);
         return NULL;
     }
 
-    readn(fd_skt, file_data, *file_len);
+    if (readn(fd_skt, file_data, *file_len) == -1)
+        free(file_data);
 
     return errno ? NULL : file_data;
 }

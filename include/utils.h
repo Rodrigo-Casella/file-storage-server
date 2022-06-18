@@ -1,9 +1,9 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include <stdio.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -78,10 +78,13 @@
         action;                                                  \
     }
 
-#define FOR_ACTION(condition, action) \
-    for (condition)                   \
-    {                                 \
-        action;                       \
+#define SAVE_ERRNO_AND_RETURN(action, retval) \
+    if (1)                                    \
+    {                                         \
+        int errnosave = errno;                \
+        action;                               \
+        errno = errnosave;                    \
+        return retval;                        \
     }
 
 #define TOKENIZER(string, del, action)                                \

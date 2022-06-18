@@ -118,7 +118,8 @@ int readFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
 
-    char *buf;
+    char *buf,
+        *save_dir_path_buf;
 
     size_t size;
 
@@ -144,7 +145,26 @@ int readFileHandler(const char *file_path, const char *save_dir)
 
     if(save_dir)
     {
-        printf("Salvo il file su %s\n", save_dir);
+        save_dir_path_buf = calloc(strlen(save_dir) + strlen(file_path) + 2, sizeof(char));
+
+        if (!save_dir_path_buf)
+        {
+            errno = ENOMEM;
+            SAVE_ERRNO_AND_RETURN(closeFile(resolved_path); free(buf), -1);
+        }
+
+        strcat(save_dir_path_buf, save_dir);
+        //save_dir_path_buf[strlen(save_dir)] = '/';
+        strcat(save_dir_path_buf, file_path);
+
+        printf("Salvando file su %s\n", save_dir_path_buf);
+        if (writeFileToDisk(save_dir_path_buf, buf, size) == -1)
+        {
+            perror("writeFileToDisk");
+            SAVE_ERRNO_AND_RETURN(closeFile(resolved_path); free(buf); free(save_dir_path_buf), -1);
+        }
+
+        free(save_dir_path_buf);
     }
 
     free(buf);
@@ -154,6 +174,7 @@ int readFileHandler(const char *file_path, const char *save_dir)
         perror("closeFile");
         return -1;
     }
+
     return 0;
 }
 
@@ -177,7 +198,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
         if (!currPath)
         {
             errno = ENOMEM;
-            break;
+            return -1;
         }
 
         strcpy(currPath, dirToWrite);
@@ -190,7 +211,10 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
         if (S_ISDIR(info.st_mode))
         {
             if (writeDirHandler(currPath, dirToSave, filesToWrite, filesWritten) == -1)
+            {
+                free(currPath);
                 return -1;
+            }
         }
         else
         {

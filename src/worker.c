@@ -148,6 +148,7 @@ void *processRequest(void *args)
             *client_fd = 0;
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
             free(client_fd);
+            continue;
         }
 
         request_payload = readRequestPayload(*client_fd, request_len);
