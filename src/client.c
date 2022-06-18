@@ -20,7 +20,7 @@
 #define HELP_MSG                                                                                                                        \
     "Uso: %s -f <socketfile> [OPTIONS]\n"                                                                                               \
     "-h,                    stampa questo messaggio e termina immediatamente.\n"                                                        \
-    "-f <sockefile>,        specifica la socket a cui connettersi.\n"                                                                   \
+    "-f <socketfile>,        specifica la socket a cui connettersi.\n"                                                                   \
     "-w <dirname>[,n=0],    scrive sul server i file presenti nella cartella specificata;\n"                                            \
     "                       se la cartella contiene altre sotto cartelle queste\n"                                                      \
     "                       vengono visitate ricorsivamente e vengono scritti fino a N file, se N non e' specificato\n"                 \
