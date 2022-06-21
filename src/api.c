@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "../include/api.h"
+#include "../include/io_utils.h"
 #include "../include/message_protocol.h"
 #include "../include/utils.h"
 
@@ -31,215 +32,27 @@ const char *responseMsg[] = {
 #define PRINT_OP(op, file, outcome) \
     printf("%s: %s %s", #op, file, responseMsg[outcome - 1]);
 
-#define SERVER_RESPONSE(op, file)                                   \
-    if (1)                                                          \
-    {                                                               \
-        int response_code;                                      \
-        if (read(fd_skt, &response_code, sizeof(int)) == -1)    \
-        {                                                           \
-            PRINT_OP(op, file, INVALID_RES);                        \
-            return -1;                                              \
-        }                                                           \
-        if (response_code < SUCCESS || response_code > INVALID_RES) \
-        {                                                           \
-            PRINT_OP(op, file, INVALID_RES);                        \
-            errno = EBADE;                                          \
-            return -1;                                              \
-        }                                                           \
-        if (toPrint)                                                \
-            PRINT_OP(op, file, response_code);                      \
-                                                                    \
-        errno = response_code != SUCCESS ? EBADE : 0;               \
-    }
-
-#define PRINT_RDWR_BYTES(bytes, op)           \
-    if (toPrint && !errno)                    \
-    {                                         \
-        printf("%ld bytes %s\n", bytes, #op); \
+#define SERVER_RESPONSE(op, file)                                \
+    if (1)                                                       \
+    {                                                            \
+        int response_code;                                       \
+        if (read(fd_skt, &response_code, sizeof(int)) == -1)     \
+            PRINT_OP(op, file, INVALID_RES);                     \
+        if (response_code < SUCCESS || response_code > BIG_FILE) \
+            response_code = INVALID_RES;                         \
+        if (toPrint)                                             \
+            PRINT_OP(op, file, response_code);                   \
+                                                                 \
+        errno = response_code != SUCCESS ? EBADE : 0;            \
     }
 
 int toPrint = 0;
 int fd_skt = 0;
 char server_addr_path[UNIX_PATH_MAX];
 
-/**
- * @brief Rimuove la sottostringa 'sub' dalla stringa 'str'.
- * 
- * @param str stringa originale
- * @param sub sotto-stringa da rimuovere
- * @return la stringa orginiale meno la sottostringa
- */
-char* strremove(char* str, const char* sub) {
-    char* p, * q, * r;
-    if ((q = r = strstr(str, sub)) != NULL) {
-        size_t len = strlen(sub);
-        while ((r = strstr(p = r + len, sub)) != NULL) {
-            while (p < r)
-                *q++ = *p++;
-        }
-        while ((*q++ = *p++) != '\0')
-            continue;
-    }
-    return str;
-}
-
-/**
- * @brief Crea ricorsivamente cartelle
- * 
- * @note Adattato da https://nachtimwald.com/2019/07/10/recursive-create-directory-in-c-revisited/
- * 
- * @param dir pathname completo da creare
- * @return 0 se successo, -1 altrimenti e ernno settato
- */
-static int recursive_mkdir(const char *dir) {
-    char *tmp;
-    const char *dirPtr;
-    size_t len;
-
-    if (!dir)
-    {
-        errno = EINVAL;
-        return -1;
-    }
-    
-    len = strlen(dir) + 1;
-    
-    tmp = calloc(len, sizeof(char));
-
-    if (!tmp)
-    {
-        errno = ENOMEM;
-        return -1;
-    }
-    
-    dirPtr = dir;
-
-    while((errno = 0, dirPtr = strchr(dirPtr, '/')) != NULL)
-    {
-        if (dirPtr == dir && *dirPtr == '/')
-        {
-            dirPtr++;
-            continue;
-        }
-
-        memcpy(tmp, dir, dirPtr - dir);
-        tmp[dirPtr - dir] = '\0';
-        dirPtr++;
-
-        puts(tmp);
-
-        if (mkdir(tmp, S_IRWXU) == -1 && errno != EEXIST)
-            break;
-    }
-
-    free(tmp);
-
-    mkdir(dir, S_IRWXU);
-
-    errno = errno != EEXIST ? errno : 0;
-
-    return errno ? -1 : 0;
-}
-
-int writeFileToDisk(char *path, void *buf, size_t size)
-{
-    char *lastDir;
-    
-    int file_fd;
-
-    if (!path || !buf || size < 1)
-    {
-        errno = EINVAL;
-        return -1;
-    }
-
-    //path = strremove(path, "../");
-
-    lastDir = strrchr(path, '/'); //path meno le cartelle fino al filename
-
-    if (lastDir)
-    {
-        *lastDir = '\0'; //escludo il filename dal path per creare ricorsivamente le cartelle di cui ho bisogno
-        if (recursive_mkdir(path) == -1)
-            return -1;
-
-        *lastDir = '/';
-    }
-
-    if ((file_fd = open(path, O_WRONLY | O_CREAT, S_IRWXU)) == -1)
-        return -1;
-
-    if (writen(file_fd, buf, size) == -1)
-    {
-        SAVE_ERRNO_AND_RETURN(close(file_fd), -1);
-    }
-
-    close(file_fd);
-
-    return errno ? -1 : 0;
-}
-
-static char *readFileFromPath(const char *path, size_t *file_len)
-{
-    char *file_data = NULL;
-
-    int file_fd;
-
-    if ((file_fd = open(path, O_RDONLY)) == -1)
-        return NULL;
-
-    if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
-    {
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
-    }
-
-    if (lseek(file_fd, 0L, SEEK_SET) == -1)
-    {
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
-    }
-
-    file_data = calloc((*file_len), sizeof(char));
-
-    if (!file_data)
-    {
-        errno = ENOMEM;
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
-    }
-
-    if (readn(file_fd, file_data, *file_len) == -1)
-    {
-        SAVE_ERRNO_AND_RETURN(close(file_fd); free(file_data), NULL);
-    }
-
-    close(file_fd);
-
-    return errno ? NULL : file_data;
-}
-
-static char *readFileFromServer(size_t *file_len)
-{
-    char *file_data;
-
-    if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
-        return NULL;
-
-    file_data = calloc(*file_len, sizeof(char));
-
-    if(!file_data)
-    {
-        errno = ENOMEM;
-        return NULL;
-    }
-
-    if (readn(fd_skt, file_data, *file_len) == -1)
-        free(file_data);
-
-    return errno ? NULL : file_data;
-}
-
 static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
 {
-    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_FILE) || !request_msg || *request_msg_len < 1)
+    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_FILE) || !request_msg || *request_msg_len <= 0)
     {
         errno = EINVAL;
         return -1;
@@ -332,7 +145,8 @@ int openFile(const char *pathname, int flags)
         return -1;
     }
 
-    pathname_buf = strndup(pathname, pathname_len++);
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
@@ -373,7 +187,8 @@ int writeFile(const char *pathname, const char *dirname)
         return -1;
     }
 
-    pathname_buf = strndup(pathname, pathname_len++);
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
@@ -409,7 +224,7 @@ int writeFile(const char *pathname, const char *dirname)
     return errno ? -1 : 0;
 }
 
-int readFile(const char* pathname, void** buf, size_t* size)
+int readFile(const char *pathname, void **buf, size_t *size)
 {
     int op = READ_FILE;
 
@@ -425,7 +240,8 @@ int readFile(const char* pathname, void** buf, size_t* size)
         return -1;
     }
 
-    pathname_buf = strndup(pathname, pathname_len++);
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
@@ -439,20 +255,77 @@ int readFile(const char* pathname, void** buf, size_t* size)
         return -1;
 
     free(pathname_buf);
-    
+
     SERVER_RESPONSE(readFile, pathname);
 
     if (!errno)
     {
-        *buf = readFileFromServer(size);
+        *buf = readFileFromServer(fd_skt, size);
 
         if (!(*buf))
             return -1;
 
         PRINT_RDWR_BYTES(*size, letti);
-    }  
+    }
 
     return errno ? -1 : 0;
+}
+
+int readNFiles(int N, const char *dirname)
+{
+    int op = READ_N_FILE;
+
+    char *files_to_read_buf;
+
+    size_t buf_len;
+
+    struct iovec request[3];
+
+    if (dirname && strlen(dirname) < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    buf_len = snprintf(NULL, 0, "%d", N) + 1;
+
+    files_to_read_buf = calloc(buf_len, sizeof(char));
+
+    if (!files_to_read_buf)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    snprintf(files_to_read_buf, buf_len, "%d", N);
+
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &buf_len, files_to_read_buf) == -1)
+    {
+        free(files_to_read_buf);
+        return -1;
+    }
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+    {
+        free(files_to_read_buf);
+        return -1;
+    }
+
+    SERVER_RESPONSE(readNFiles, files_to_read_buf);
+
+    free(files_to_read_buf);
+
+    if (errno)
+        return -1;
+
+    int files_read = readMultipleFilesFromServer(fd_skt, N, dirname);
+
+    if (toPrint)
+        printf("Ho letto %d files dal server.\n", files_read);
+
+    return files_read;
 }
 
 int closeFile(const char *pathname)
@@ -471,7 +344,8 @@ int closeFile(const char *pathname)
         return -1;
     }
 
-    pathname_buf = strndup(pathname, pathname_len++);
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
@@ -479,11 +353,14 @@ int closeFile(const char *pathname)
     memset(request, 0, sizeof(request));
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+    {
+        free(pathname_buf);
         return -1;
+    }
 
     if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
     {
-        perror("writev");
+        free(pathname_buf);
         return -1;
     }
 

@@ -40,7 +40,8 @@ static Option *allocOption(char opt, char *arg)
             return NULL;
         }
 
-        strncpy(newOption->arg, arg, argLength);
+        strcpy(newOption->arg, arg);
+        newOption->arg[argLength - 1] = '\0';
         newOption->arg[strcspn(newOption->arg, "\n")] = '\0';
     }
 
@@ -70,7 +71,6 @@ static void addOption(OptionList *list, char opt, char *arg)
     }
     else
     {
-
         list->tail->next = newOption;
         list->tail = list->tail->next;
     }
@@ -153,12 +153,8 @@ OptionList *parseCmdLine(int argc, char *argv[])
 
         case 'R':
             CHECK_OPTIONAL_ARGUMENT;
-            if (!optarg)
-            {
-                addOption(list, opt, "n=0");
-                break;
-            }
-            addOption(list, opt, optarg);
+
+            addOption(list, opt, !optarg ? "0" : optarg);
             break;
         default:
             if (CHECK_ARGUMENT)

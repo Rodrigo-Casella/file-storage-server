@@ -310,3 +310,58 @@ icl_hash_dump(FILE* stream, icl_hash_t* ht)
 
     return 0;
 }
+
+icl_hash_iter_t *icl_hash_iterator_create(icl_hash_t *ht) {
+    icl_hash_iter_t *ht_iter;
+
+    ht_iter = malloc(sizeof(icl_hash_iter_t));
+
+    if (!ht_iter)
+        return NULL;
+
+    ht_iter->currEntry = NULL;
+
+    ht_iter->currIndex = 0;
+
+    ht_iter->ht = ht;
+
+    return ht_iter;
+}
+
+int icl_hash_next(icl_hash_iter_t* iter) {
+    icl_hash_t* ht = iter->ht;
+
+    while (iter->currIndex < ht->nbuckets) 
+    {
+        size_t i = iter->currIndex;
+        
+        if (ht->buckets[i])
+        {
+            if (!iter->currEntry)
+            {
+                iter->currEntry = ht->buckets[i];
+                return 1;
+            }
+
+            if (iter->currEntry->next)
+            {
+                iter->currEntry = iter->currEntry->next;
+                return 1;
+            }
+        }
+
+        iter->currEntry = NULL;
+        iter->currIndex++;
+    }
+    return 0;
+}
+
+int icl_hash_iterator_destroy(icl_hash_iter_t *ht_iter)
+{
+    if (!ht_iter)
+        return -1;
+
+    free(ht_iter);
+
+    return 0;
+}

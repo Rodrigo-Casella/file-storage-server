@@ -31,7 +31,8 @@ static File *initFile(const char *path)
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newFile, perror("calloc"); return NULL, 1, sizeof(File));
 
     // duplico il path del file, ritorno NULL se c'è stato un errore
-    CHECK_RET_AND_ACTION(strndup, ==, NULL, newFile->path, perror("strndup"); return NULL, path, strlen(path) + 1);
+    CHECK_RET_AND_ACTION(strdup, ==, NULL, newFile->path, perror("strdup"); return NULL, path);
+    newFile->path[strlen(path)] = '\0';
 
     newFile->data = NULL;
     newFile->dataSize = 0;
@@ -407,6 +408,86 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
     UNLOCK(&(file->fileLock));
 
     return errno ? -1 : 0;
+}
+
+int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize)
+{
+    int readCount;
+
+    size_t bufCurrSize = 0;
+
+    char* file_data_buf = NULL;
+
+    File *currFile;
+
+    icl_hash_iter_t *iter;
+
+    if (!fs) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    LOCK(&(fs->fileSystemLock));
+
+    iter = icl_hash_iterator_create(fs->hastTable);
+
+    if(!iter)
+    {
+        UNLOCK(&(fs->fileSystemLock));
+        errno = ENOMEM;
+        return -1;
+    }
+
+    if (icl_hash_next(iter) == 0)
+        goto cleanup;
+    
+    currFile = (File *)iter->currEntry->data;
+
+    readCount = 0;
+    while (currFile && (readCount < upperLimit || upperLimit <= 0))
+    {
+        size_t path_len = strlen(currFile->path) + 1;
+
+        size_t bufNewSize = bufCurrSize + sizeof(size_t) + path_len + sizeof(size_t) + currFile->dataSize;
+        
+        void* tmp = realloc(file_data_buf, bufNewSize);
+        if (!tmp) 
+        {
+            UNLOCK(&(fs->fileSystemLock));
+            errno = ENOMEM;
+            free(file_data_buf);
+            return -1;
+        }
+
+        file_data_buf = tmp;
+
+        memcpy(file_data_buf + bufCurrSize, &path_len, sizeof(size_t)); // Copio la dimensione del path del file
+
+        memcpy(file_data_buf + bufCurrSize + sizeof(size_t), currFile->path, path_len); // Copio il path del file
+
+        memcpy(file_data_buf + bufCurrSize + sizeof(size_t) + path_len, &(currFile->dataSize), sizeof(size_t)); // Copio la dimensione del file
+
+        memcpy((file_data_buf + bufNewSize - (currFile->dataSize)), currFile->data, currFile->dataSize); // Copio il file
+
+        bufCurrSize = bufNewSize;
+
+        readCount++;
+
+        if (icl_hash_next(iter) == 0)
+            break;
+        
+        currFile = (File *)iter->currEntry->data;
+    }
+
+    cleanup:
+    icl_hash_iterator_destroy(iter);
+
+    UNLOCK(&(fs->fileSystemLock));
+
+    *data_buf = file_data_buf;
+    *dataSize = bufCurrSize;
+
+    return readCount;
 }
 
 int closeFileHandler(Filesystem *fs, const char *path, int clientFd)

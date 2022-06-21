@@ -210,6 +210,9 @@ char *readFileFromServer(int fd_skt, size_t *file_len)
     if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
         return NULL;
 
+    if (*file_len == 0)
+        return NULL;
+
     file_data = calloc(*file_len, sizeof(char));
 
     if (!file_data)
@@ -236,6 +239,7 @@ int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir)
     size_t file_path_len,
         file_len;
 
+    files_read = 0;
     while (1)
     {
         failToWrite = 0;
@@ -246,7 +250,7 @@ int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir)
 
         file_path = readFileFromServer(fd_skt, &file_path_len);
 
-        if (file_len == 0) // Non ho più file da leggere;
+        if (file_path_len == 0) // Non ho più file da leggere
             return files_read;
 
         if (!file_path)

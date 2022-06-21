@@ -93,6 +93,20 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *dataSize, int clientFd);
 
 /**
+ * @brief Legge fino a 'upperLimit' files dal server e li salva nel buffer 'data_buf' di dimensione 'dataSize'
+ * 
+ * @param fs puntatore al filesystem
+ * @param upperLimit limite superiore di file da leggere
+ * @param data_buf buffer su cui scrivere il file
+ * @param dataSize dimensione del buffer
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ * 
+ * \retval numero dei file letti >= 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize);
+
+/**
  * @brief chiude un file del filesystem.
  *
  * @param fs puntatore al filesystem

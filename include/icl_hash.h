@@ -33,6 +33,13 @@ extern "C"
         int (*hash_key_compare)(void *, void *);
     } icl_hash_t;
 
+    typedef struct icl_hash_iter_s
+    {
+        icl_hash_t *ht;
+        icl_entry_t *currEntry;
+        size_t currIndex;
+    } icl_hash_iter_t;
+
     icl_hash_t *
     icl_hash_create(int nbuckets, unsigned int (*hash_function)(void *), int (*hash_key_compare)(void *, void *));
 
@@ -47,9 +54,14 @@ extern "C"
 
     int
     icl_hash_destroy(icl_hash_t *, void (*)(void *), void (*)(void *)),
-        icl_hash_dump(FILE *, icl_hash_t *);
+        icl_hash_dump(FILE *, icl_hash_t *),
+        icl_hash_iterator_destroy(icl_hash_iter_t *ht_iter),
+        icl_hash_next(icl_hash_iter_t* iter);
 
     int icl_hash_delete(icl_hash_t *ht, void *key, void (*free_key)(void *), void (*free_data)(void *));
+
+    icl_hash_iter_t
+        *icl_hash_iterator_create(icl_hash_t *ht);
 
     /* simple hash function */
     unsigned int
@@ -59,7 +71,7 @@ extern "C"
     int
     string_compare(void *a, void *b);
 
-#define icl_hash_foreach(ht, tmpint, tmpent, kp, dp, action)                                                                                               \
+#define icl_hash_foreach(ht, tmpint, tmpent, kp, dp, action)                                                                                       \
     for (tmpint = 0; tmpint < ht->nbuckets; tmpint++)                                                                                              \
     {                                                                                                                                              \
         for (tmpent = ht->buckets[tmpint]; tmpent != NULL && ((kp = tmpent->key) != NULL) && ((dp = tmpent->data) != NULL); tmpent = tmpent->next) \

@@ -15,12 +15,13 @@
 #include "../include/api.h"
 #include "../include/cmdLineParser.h"
 #include "../include/definitions.h"
+#include "../include/io_utils.h"
 #include "../include/utils.h"
 
 #define HELP_MSG                                                                                                                        \
     "Uso: %s -f <socketfile> [OPTIONS]\n"                                                                                               \
     "-h,                    stampa questo messaggio e termina immediatamente.\n"                                                        \
-    "-f <socketfile>,        specifica la socket a cui connettersi.\n"                                                                   \
+    "-f <socketfile>,        specifica la socket a cui connettersi.\n"                                                                  \
     "-w <dirname>[,n=0],    scrive sul server i file presenti nella cartella specificata;\n"                                            \
     "                       se la cartella contiene altre sotto cartelle queste\n"                                                      \
     "                       vengono visitate ricorsivamente e vengono scritti fino a N file, se N non e' specificato\n"                 \
@@ -51,19 +52,18 @@
 
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
 
-#define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir)                         \
-    if (nextOption && nextOption->opt == d_or_D)                            \
-        skipOption = 1;                                                     \
-                                                                            \
-    if (skipOption)                                                         \
-        CHECK_RET_AND_ACTION(strndup, ==, NULL, saveDir, perror("strndup"), \
-                             nextOption->arg, strlen(nextOption->arg) + 1);
+#define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir) \
+    if (nextOption && nextOption->opt == d_or_D)    \
+    {                                               \
+        skipOption = 1;                             \
+        saveDir = nextOption->arg;                  \
+    }
 
-#define CHECK_IS_NUMBER(num_string, num)                                                                           \
-    if (num_string && ((isNumber(num_string + 2, &num) != 0) || num < 0)) /* nFiles + 2: salto i caratteri n=*/    \
-    {                                                                                                              \
-        fprintf(stderr, "Errore: %s non e' un numero o e' negativo. Impostando valore di default.\n", num_string); \
-        num = 0;                                                                                                   \
+#define CHECK_IS_NUMBER(num_string, num)                                                                     \
+    if (num_string && ((isNumber(num_string, &num) != 0)))                                                   \
+    {                                                                                                        \
+        fprintf(stderr, "Errore: %s, non e' un numero valido. Impostando valore di default.\n", num_string); \
+        num = 0;                                                                                             \
     }
 
 char *realpath(const char *path, char *resolved_path);
@@ -118,8 +118,7 @@ int readFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
 
-    char *buf,
-        *save_dir_path_buf;
+    char *buf;
 
     size_t size;
 
@@ -143,28 +142,13 @@ int readFileHandler(const char *file_path, const char *save_dir)
         return -1;
     }
 
-    if(save_dir)
+    if (save_dir)
     {
-        save_dir_path_buf = calloc(strlen(save_dir) + strlen(file_path) + 2, sizeof(char));
+        if (toPrint)
+            printf("Salvando file su %s\n", save_dir);
 
-        if (!save_dir_path_buf)
-        {
-            errno = ENOMEM;
-            SAVE_ERRNO_AND_RETURN(closeFile(resolved_path); free(buf), -1);
-        }
-
-        strcat(save_dir_path_buf, save_dir);
-        //save_dir_path_buf[strlen(save_dir)] = '/';
-        strcat(save_dir_path_buf, file_path);
-
-        printf("Salvando file su %s\n", save_dir_path_buf);
-        if (writeFileToDisk(save_dir_path_buf, buf, size) == -1)
-        {
-            perror("writeFileToDisk");
-            SAVE_ERRNO_AND_RETURN(closeFile(resolved_path); free(buf); free(save_dir_path_buf), -1);
-        }
-
-        free(save_dir_path_buf);
+        if (writeFileToDir(save_dir, file_path, buf, size) == -1)
+            perror("writeFileToDir");
     }
 
     free(buf);
@@ -178,7 +162,7 @@ int readFileHandler(const char *file_path, const char *save_dir)
     return 0;
 }
 
-int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToWrite, int *filesWritten)
+int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWrite, int *filesWritten)
 {
     DIR *dir;
     struct dirent *entry;
@@ -188,7 +172,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
     SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, return -1, dirToWrite);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
-    while ((entry = readdir(dir)) && (!filesToWrite || *filesWritten != filesToWrite))
+    while ((entry = readdir(dir)) && (filesToWrite <= 0 || *filesWritten < filesToWrite))
     {
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
             continue;
@@ -212,6 +196,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
         {
             if (writeDirHandler(currPath, dirToSave, filesToWrite, filesWritten) == -1)
             {
+                closedir(dir);
                 free(currPath);
                 return -1;
             }
@@ -220,10 +205,11 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
         {
             if (writeFileHandler(currPath, dirToSave) == -1)
             {
+                closedir(dir);
                 free(currPath);
                 return -1;
             }
-        
+
             (*filesWritten)++;
         }
 
@@ -242,10 +228,10 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const long filesToW
  * @param save_dir cartella di salvataggio opzionale
  * @param del demilimitatore che separa i nomi dei file
  * @param apiHandler handler dell'api da chiamare
- * 
+ *
  * @return 0 se successo, -1 altrimenti e errno settato
  */
-int callReadWriteOnList(char *file_list, char *save_dir, const char * delim, int (*apiHandler)(const char *, const char *))
+int callReadWriteOnList(char *file_list, char *save_dir, const char *delim, int (*apiHandler)(const char *, const char *))
 {
     if (!file_list || !delim)
     {
@@ -290,7 +276,7 @@ int main(int argc, char *argv[])
 
     CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
 
-    CHECK_RET_AND_ACTION(strndup, ==, NULL, sockname, FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption->arg, strlen(selectedOption->arg) + 1);
+    CHECK_RET_AND_ACTION(strdup, ==, NULL, sockname, perror("strdup"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption->arg);
 
     freeOption(selectedOption);
 
@@ -321,37 +307,38 @@ int main(int argc, char *argv[])
     selectedOption = list->head;
     int skipOption = 0;
 
+    char *saveDir;
+
     while (selectedOption)
     {
-        char *nFiles_string = NULL, *saveDir = NULL;
-        long nFiles = 0;
+        skipOption = 0;
+
+        saveDir = NULL;
 
         switch (selectedOption->opt)
         {
         case 'w':;
-            CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
-
-            char *dirToWrite = NULL;
-
-            dupNTokens(selectedOption->arg, ",", 2, &dirToWrite, &nFiles_string);
-
-            CHECK_IS_NUMBER(nFiles_string, nFiles);
+            char *filesToWrite_string,
+                *dirToWrite;
+            
+            long filesToWrite = 0;
 
             int filesWritten = 0;
 
-            if (writeDirHandler(dirToWrite, saveDir, nFiles, &filesWritten) || filesWritten <= 0)
-                fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
+            CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
-            freeNargs(3, &saveDir, &dirToWrite, &nFiles_string);
+            getNTokens(selectedOption->arg, ",", 2, &dirToWrite, &filesToWrite_string);
+
+            CHECK_IS_NUMBER(filesToWrite_string, filesToWrite);
+
+            if (writeDirHandler(dirToWrite, saveDir, filesToWrite, &filesWritten) || filesWritten <= 0)
+                fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
             break;
         case 'W':;
             CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
             if (callReadWriteOnList(selectedOption->arg, saveDir, ",", writeFileHandler) == -1)
                 perror("callReadWriteOnList");
-
-            if (saveDir)
-                free(saveDir);
             break;
         case 'D':
             fprintf(stderr, "Errore, l'opzione -D va usata congiuntamente a -w o -W.\n");
@@ -361,20 +348,15 @@ int main(int argc, char *argv[])
 
             if (callReadWriteOnList(selectedOption->arg, saveDir, ",", readFileHandler) == -1)
                 perror("callReadWriteOnList");
-
-            if (saveDir)
-                free(saveDir);
             break;
         case 'R':;
+            long files_to_read = 0;
             CHECK_SAVE_DIR(selectedOption->next, 'd', saveDir);
 
-            CHECK_RET_AND_ACTION(strndup, ==, NULL, nFiles_string, perror("strndup"), selectedOption->arg, strlen(selectedOption->arg) + 1);
+            CHECK_IS_NUMBER(selectedOption->arg, files_to_read);
 
-            CHECK_IS_NUMBER(nFiles_string, nFiles);
-
-            printf("Leggo %ld casuali dal files dal server.\n", nFiles);
-
-            freeNargs(2, &saveDir, &nFiles_string);
+            if (readNFiles(files_to_read, saveDir) == -1)
+                perror("readNFiles");
             break;
         case 'd':
             fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
@@ -395,9 +377,9 @@ int main(int argc, char *argv[])
 
         nanosleep(&requestInterval, NULL);
 
-        if (skipOption)
-            skipOption = 0, selectedOption = selectedOption->next->next;
-        else
+        selectedOption = selectedOption->next;
+
+        if (skipOption && selectedOption)
             selectedOption = selectedOption->next;
     }
 

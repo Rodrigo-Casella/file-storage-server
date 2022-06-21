@@ -132,6 +132,8 @@ void *processRequest(void *args)
         int request_code = 0,
             open_file_flag = 0;
 
+        long upperLimit = 0;
+
         size_t file_size = 0,
                request_len = 0;
 
@@ -211,10 +213,34 @@ void *processRequest(void *args)
              SEND_RESPONSE_CODE(*client_fd, SUCCESS);
 
             if (writeSegment(*client_fd, &file_data_buf, &file_size) == -1)
-            {
                 fprintf(stderr, "Errore inviando file al client\n");
+
+            break;
+
+        case READ_N_FILE:
+            if (isNumber(request_payload, &upperLimit) != 0)
+            {
+                SEND_RESPONSE_CODE(*client_fd, INVALID_REQ);
+                break;
             }
 
+            if (readNFilesHandler(fs, upperLimit, (void **)&file_data_buf, &file_size) == -1)
+            {
+                SEND_ERROR_CODE(*client_fd);
+                break;
+            }
+
+            SEND_RESPONSE_CODE(*client_fd, SUCCESS);
+
+            if (file_data_buf)
+            {
+                if (writen(*client_fd, file_data_buf, file_size) == -1)
+                    fprintf(stderr, "Errore inviando file al client\n");
+            }
+
+            file_size = 0; // Avverto il client che non ci sono più file da leggere
+            if (writen(*client_fd, &file_size, sizeof(size_t)) == -1)
+                fprintf(stderr, "Errore inviando mesaggio di terminazione al client\n");
             break;
         case CLOSE_FILE:
             if (closeFileHandler(fs, request_payload, *client_fd) == -1)

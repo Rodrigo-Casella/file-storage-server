@@ -87,6 +87,12 @@
         return retval;                        \
     }
 
+#define PRINT_RDWR_BYTES(bytes, op)           \
+    if (toPrint && !errno)                    \
+    {                                         \
+        printf("%ld bytes %s\n", bytes, #op); \
+    }
+
 #define TOKENIZER(string, del, action)                                \
     if (1)                                                            \
     {                                                                 \
@@ -99,16 +105,17 @@
     }
 
 #define TIME_IS_ZERO(time) (time.tv_sec == 0 && time.tv_nsec == 0)
-static inline void dupNTokens(char *string, const char *del, int n, ...)
+
+static inline void getNTokens(char *arg, const char *del, int n, ...)
 {
     va_list ap;
     va_start(ap, n);
     char *token, *savePtr;
-    token = strtok_r(string, del, &savePtr);
+    token = strtok_r(arg, del, &savePtr);
     for (int i = 0; token && i < n; i++)
     {
         char **string = va_arg(ap, char **);
-        *string = strndup(token, strlen(token) + 1);
+        *string = token;
         token = strtok_r(NULL, del, &savePtr);
     }
     va_end(ap);
