@@ -8,7 +8,7 @@
 fdNode *initNode(int fd)
 {
     fdNode *newNode;
-    CHECK_RET_AND_ACTION(calloc, ==, NULL, newNode, perror("calloc"); return NULL, 1, sizeof(*newNode));
+    CHECK_RET_AND_ACTION(calloc, ==, NULL, newNode, errno = ENOMEM; return NULL, 1, sizeof(*newNode));
 
     newNode->fd = fd;
     newNode->next = newNode->prev = NULL;
@@ -25,25 +25,27 @@ void deleteNode(fdNode *node)
 fdList *initList()
 {
     fdList *newList;
-    CHECK_RET_AND_ACTION(calloc, ==, NULL, newList, perror("calloc"); return NULL, 1, sizeof(*newList));
+    CHECK_RET_AND_ACTION(calloc, ==, NULL, newList, errno = ENOMEM; return NULL, 1, sizeof(*newList));
 
     newList->head = newList->tail = NULL;
 
     return newList;
 }
 
-void deleteList(fdList *list)
+void deleteList(fdList **list)
 {
     fdNode *tmp;
 
-    while (list->head)
+    while ((*list)->head)
     {
-        tmp = list->head;
-        list->head = list->head->next;
+        tmp = (*list)->head;
+        (*list)->head = (*list)->head->next;
         deleteNode(tmp);
     }
 
-    free(list);
+    free(*list);
+
+    *list = NULL;
 }
 
 fdNode *getNode(fdList *list, int key)
@@ -69,6 +71,19 @@ fdNode *getNode(fdList *list, int key)
         }
     }
     return NULL;
+}
+
+fdNode *popNode(fdList *list)
+{
+    fdNode *ret = list->head;
+
+    if (list->head)
+        list->head = list->head->next;
+
+    if (ret && ret->next)
+        ret->next->prev = ret->prev;
+
+    return !ret ? NULL : ret;
 }
 
 int findNode(fdList *list, int key)

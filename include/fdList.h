@@ -17,9 +17,9 @@ typedef struct fd_list
 fdNode *initNode(int fd);
 void deleteNode(fdNode *node);
 fdList *initList();
-void deleteList(fdList *list);
+void deleteList(fdList **list);
 fdNode *getNode(fdList *list, int key);
-
+fdNode *popNode(fdList *list);
 /**
  * @brief Cerca il nodo con la chive 'key' nella lista
  *

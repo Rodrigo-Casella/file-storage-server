@@ -114,8 +114,8 @@ static inline void getNTokens(char *arg, const char *del, int n, ...)
     token = strtok_r(arg, del, &savePtr);
     for (int i = 0; token && i < n; i++)
     {
-        char **string = va_arg(ap, char **);
-        *string = token;
+        char **ptr = va_arg(ap, char**);
+        *ptr = token;
         token = strtok_r(NULL, del, &savePtr);
     }
     va_end(ap);

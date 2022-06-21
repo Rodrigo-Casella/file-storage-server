@@ -20,6 +20,7 @@ typedef struct file
     int nReaders;
 
     fdList *openedBy;
+    fdList *waitingForLock;
     int lockedBy;
 } File;
 
@@ -80,13 +81,13 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
 /**
  * @brief Legge un file dal filesystem
- * 
+ *
  * @param fs puntatore al filesystem
  * @param path path del file da leggere
  * @param data_buf buffer su cui scrivere il file
  * @param dataSize dimensione del file letto
  * @param clientFd fd del processo che ha richiesto l'operazione
- * 
+ *
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
@@ -94,20 +95,58 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
 
 /**
  * @brief Legge fino a 'upperLimit' files dal server e li salva nel buffer 'data_buf' di dimensione 'dataSize'
- * 
+ *
  * @param fs puntatore al filesystem
  * @param upperLimit limite superiore di file da leggere
  * @param data_buf buffer su cui scrivere il file
  * @param dataSize dimensione del buffer
  * @param clientFd fd del processo che ha richiesto l'operazione
- * 
+ *
  * \retval numero dei file letti >= 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
 int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize);
 
 /**
- * @brief chiude un file del filesystem.
+ * @brief richiesta di acquisire la lock sul file 'path' del filesystem 'fs' da parte del processo 'clientFd'.
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file su cui acquisire la lock
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int lockFileHandler(Filesystem *fs, const char *path, int clientFd);
+
+/**
+ * @brief richiesta di rilasciare la lock sul file 'path' del filesystem 'fs' da parte del processo 'clientFd'.
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file su cui rilasciare la lock
+ * @param nextLockFd puntatore al fd del client che ha acquisito la lock
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int clientFd);
+
+/**
+ * @brief richiesta di rimuovere il file 'path' dal filesystem 'fs' da parte del processo 'clientFd'. In 'signalForLock' viene ritornato il puntatore alla lista dei client in attesa per la lock
+ *
+ * @param fs puntatore al filesystem
+ * @param path path del file da rimuovere
+ * @param signalForLock lista dei client in attesa della lock per il file
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ *
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int removeFileHandler(Filesystem *fs, const char *path, fdList *signalForLock, int clientFd);
+
+/**
+ * @brief richiesta di chiudere il file 'path' dal filesystem 'fs' da parte del processo 'clientFd'.
  *
  * @param fs puntatore al filesystem
  * @param path path del file da chiudere
@@ -119,12 +158,23 @@ int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, siz
 int closeFileHandler(Filesystem *fs, const char *path, int clientFd);
 
 /**
- * @brief Verifica che il client che ha richiesto una writeFile abbia precedentemente effettuato una openFile con i flag O_CREATE O_LOCK
+ * @brief 
  * 
+ * @param fs puntatore al filesystem
+ * @param notifyList lista dei client in attesa della lock per il file
+ * @param clientFd fd del processo che ha richiesto l'operazione
+ * \retval 0 se successo
+ * \retval -1 se errore (errno settato opportunatamente)
+ */
+int clientExitHandler(Filesystem *fs, fdList *signalForLock, int clientFd);
+
+/**
+ * @brief Verifica che il client che ha richiesto una writeFile abbia precedentemente effettuato una openFile con i flag O_CREATE O_LOCK
+ *
  * @param fs puntatore al filesystem
  * @param path path del file
  * @param clientFd fd del processo che ha richiesto l'operazione
- * 
+ *
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */

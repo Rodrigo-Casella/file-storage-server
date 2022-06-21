@@ -41,6 +41,7 @@
 
 #define RETRY_TIME_MSEC 1000
 #define MAX_RETRY_TIME_SEC 5
+
 #define FREE_AND_EXIT(list, option, status) \
     freeOption(option);                     \
     freeOptionList(list);                   \
@@ -51,6 +52,20 @@
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
+
+#define CALL_API_ON_TOKEN(api, arg)                 \
+    if (1)                                          \
+    {                                               \
+        char *savePtr;                              \
+        char *token = strtok_r(arg, ",", &savePtr); \
+                                                    \
+        while (token)                               \
+        {                                           \
+            if (api(token) == -1)                   \
+                perror(#api);                       \
+            token = strtok_r(NULL, ",", &savePtr);  \
+        }                                           \
+    }
 
 #define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir) \
     if (nextOption && nextOption->opt == d_or_D)    \
@@ -318,9 +333,9 @@ int main(int argc, char *argv[])
         switch (selectedOption->opt)
         {
         case 'w':;
-            char *filesToWrite_string,
-                *dirToWrite;
-            
+            char *filesToWrite_string = NULL,
+                *dirToWrite = NULL;
+
             long filesToWrite = 0;
 
             int filesWritten = 0;
@@ -362,13 +377,13 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
             break;
         case 'l':
-            TOKENIZER(selectedOption->arg, ",", printf("Lock su %s.\n", token));
+            CALL_API_ON_TOKEN(lockFile, selectedOption->arg);
             break;
         case 'u':
-            TOKENIZER(selectedOption->arg, ",", printf("Unlock su %s.\n", token));
+            CALL_API_ON_TOKEN(unlockFile, selectedOption->arg);
             break;
         case 'c':
-            TOKENIZER(selectedOption->arg, ",", printf("Elimino file %s.\n", token));
+            CALL_API_ON_TOKEN(removeFile, selectedOption->arg);
             break;
         default:
             fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate

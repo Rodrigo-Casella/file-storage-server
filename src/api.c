@@ -328,6 +328,135 @@ int readNFiles(int N, const char *dirname)
     return files_read;
 }
 
+int lockFile(const char *pathname)
+{
+    int op = LOCK_FILE;
+
+    char *pathname_buf;
+
+    size_t pathname_len;
+
+    struct iovec request[3];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
+
+    if (!pathname_buf)
+        return -1;
+
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    free(pathname_buf);
+
+    SERVER_RESPONSE(lockFile, pathname);
+
+    return errno ? -1 : 0;
+}
+
+int unlockFile(const char *pathname)
+{
+    int op = UNLOCK_FILE;
+
+    char *pathname_buf;
+
+    size_t pathname_len;
+
+    struct iovec request[3];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
+
+    if (!pathname_buf)
+        return -1;
+
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    free(pathname_buf);
+
+    SERVER_RESPONSE(unlockFile, pathname);
+
+    return errno ? -1 : 0;
+}
+
+int removeFile(const char *pathname)
+{
+    int op = REMOVE_FILE;
+
+    char *pathname_buf;
+
+    size_t pathname_len;
+
+    struct iovec request[3];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    pathname_buf = strdup(pathname);
+    pathname_buf[pathname_len++] = '\0';
+
+    if (!pathname_buf)
+        return -1;
+
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+    {
+        free(pathname_buf);
+        return -1;
+    }
+
+    free(pathname_buf);
+
+    SERVER_RESPONSE(removeFile, pathname);
+
+    return errno ? -1 : 0;
+}
+
 int closeFile(const char *pathname)
 {
     int op = CLOSE_FILE;
