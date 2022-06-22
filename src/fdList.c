@@ -101,6 +101,8 @@ fdNode *popNode(fdList *list)
 
     if (ret && ret->next)
         ret->next->prev = ret->prev;
+    if (ret)
+        ret->prev = ret->next = NULL;
 
     return !ret ? NULL : ret;
 }
@@ -152,4 +154,18 @@ int insertNode(fdList *list, int fd)
 
     list->tail = newNode;
     return 0;
+}
+
+void concanateList(fdNode **dest_head, fdNode *src_head)
+{
+    if (*dest_head == NULL)
+    {
+        *dest_head = src_head;
+        return;
+    }
+
+    while((*dest_head)->next)
+        dest_head = &((*dest_head)->next);
+
+    (*dest_head)->next = src_head;
 }

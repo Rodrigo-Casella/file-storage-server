@@ -49,13 +49,14 @@
         break;                               \
     }
 
-#define SIGNAL_WAITING_FOR_LOCK(signalForLock, responseCode, managerFd)                                                          \
-    while (signalForLock && signalForLock->head)                                                                                 \
-    {                                                                                                                            \
-        SEND_RESPONSE_CODE(signalForLock->head->fd, responseCode);                                                               \
-        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(signalForLock->head->fd), sizeof(int)); \
-        fdNode *tmp = popNode(signalForLock);                                                                                    \
-        deleteNode(tmp);                                                                                                         \
+#define SIGNAL_WAITING_FOR_LOCK(signalForLock, responseCode, managerFd)                                                    \
+    while (signalForLock)                                                                                                  \
+    {                                                                                                                      \
+        SEND_RESPONSE_CODE(signalForLock->fd, responseCode);                                                               \
+        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(signalForLock->fd), sizeof(int)); \
+        fdNode *tmp = signalForLock;                                                                                       \
+        signalForLock = signalForLock->next;                                                                               \
+        deleteNode(tmp);                                                                                                   \
     }
 
 static ssize_t readRequestHeader(int fd, int *request_code, size_t *request_len)
@@ -128,12 +129,7 @@ void *processRequest(void *args)
     BQueue_t *client_request_queue = ((ThreadArgs *)args)->queue;
     Filesystem *fs = ((ThreadArgs *)args)->fs;
     int managerFd = ((ThreadArgs *)args)->write_end_pipe_fd;
-    fdList *signalForLock = initList();
-
-    if (!signalForLock)
-    {
-        THREAD_ERR_EXIT;
-    }
+    fdNode *signalForLock = NULL;
 
     while (1)
     {
@@ -143,7 +139,8 @@ void *processRequest(void *args)
             break;
 
         char *request_payload = NULL,
-             *file_data_buf = NULL;
+             *file_data_buf = NULL,
+             *evicted_files_buf = NULL;
 
         int request_code = 0,
             open_file_flag = 0,
@@ -152,6 +149,7 @@ void *processRequest(void *args)
         long upperLimit = 0;
 
         size_t file_size = 0,
+               evicted_files_size = 0,
                request_len = 0;
 
         if (readRequestHeader(*client_fd, &request_code, &request_len) == -1)
@@ -163,11 +161,11 @@ void *processRequest(void *args)
 
         if (!request_code) // Se request_code == 0 vuol dire che il client ha terminato di inviare richieste
         {
-            CHECK_AND_ACTION(clientExitHandler, ==, -1, perror("clientExitHandler"); THREAD_ERR_EXIT, fs, signalForLock, *client_fd);
+            CHECK_AND_ACTION(clientExitHandler, ==, -1, perror("clientExitHandler"); THREAD_ERR_EXIT, fs, &signalForLock, *client_fd);
             SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, SUCCESS, managerFd);
-            deleteList(&signalForLock);
+            // deleteList(&signalForLock);
 
             *client_fd = 0;
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
@@ -193,13 +191,16 @@ void *processRequest(void *args)
                 break;
             }
 
-            if (openFileHandler(fs, request_payload, open_file_flag, *client_fd) == -1)
+            if (openFileHandler(fs, request_payload, open_file_flag, &signalForLock, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
             }
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
+
+            SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
+            // deleteList(&signalForLock);
             break;
         case WRITE_FILE:
             if (canWrite(fs, request_payload, *client_fd) == 0)
@@ -217,13 +218,28 @@ void *processRequest(void *args)
                 break;
             }
 
-            if (writeFileHandler(fs, request_payload, file_data_buf, file_size, *client_fd) == -1)
+            if (writeFileHandler(fs, request_payload, file_data_buf, file_size, (void **)&evicted_files_buf, &evicted_files_size, &signalForLock, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd)
                 break;
             }
 
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
+
+            if (evicted_files_buf)
+            {
+                if (writen(*client_fd, evicted_files_buf, evicted_files_size) == -1)
+                    fprintf(stderr, "Errore inviando file al client\n");
+
+                free(evicted_files_buf);
+            }
+
+            evicted_files_size = 0; // Avverto il client che non ci sono più file da leggere
+            if (writen(*client_fd, &evicted_files_size, sizeof(size_t)) == -1)
+                fprintf(stderr, "Errore inviando mesaggio di terminazione al client\n");
+
+            SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
+            // deleteList(&signalForLock);
             break;
         case READ_FILE:
             if (readFileHandler(fs, request_payload, (void **)&file_data_buf, &file_size, *client_fd) == -1)
@@ -236,9 +252,7 @@ void *processRequest(void *args)
 
             if (writeSegment(*client_fd, &file_data_buf, &file_size) == -1)
                 fprintf(stderr, "Errore inviando file al client\n");
-
             break;
-
         case READ_N_FILE:
             if (isNumber(request_payload, &upperLimit) != 0)
             {
@@ -297,7 +311,7 @@ void *processRequest(void *args)
             }
             break;
         case REMOVE_FILE:
-            if (removeFileHandler(fs, request_payload, signalForLock, *client_fd) == -1)
+            if (removeFileHandler(fs, request_payload, &signalForLock, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd);
                 break;
@@ -305,7 +319,7 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
-            deleteList(&signalForLock);
+            // deleteList(&signalForLock);
             break;
         case CLOSE_FILE:
             if (closeFileHandler(fs, request_payload, *client_fd) == -1)
@@ -333,8 +347,6 @@ void *processRequest(void *args)
             free(client_fd);
         }
     }
-
-    deleteList(&signalForLock);
 
     pthread_exit(NULL);
 }

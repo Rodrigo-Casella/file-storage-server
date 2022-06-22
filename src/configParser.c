@@ -34,7 +34,7 @@ Setting *parseFile(const char *path)
 
     CHECK_RET_AND_ACTION(fopen, ==, NULL, fp, return NULL, path, "r");
 
-    char buf[_SC_LINE_MAX];
+    char buf[BUF_SIZE];
 
     while (fgets(buf, BUF_SIZE, fp))
     {

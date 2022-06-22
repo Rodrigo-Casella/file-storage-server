@@ -7,11 +7,89 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../include/compare_func.h"
 #include "../include/definitions.h"
 #include "../include/filesystem.h"
 #include "../include/mutex.h"
 #include "../include/utils.h"
 
+#define UPDATE_FILE_REFERENCE(file) \
+    file->lastUsed = time(NULL);    \
+    file->usedTimes++;              \
+    file->referenceBit = 1;
+
+static File *evictFile(Filesystem *fs, File *toAdd)
+{
+    File *toEvict,
+        *currFile;
+
+    toEvict = fs->file_queue_head != toAdd ? fs->file_queue_head : fs->file_queue_head->next;
+
+    if (fs->replacement_algo != FIFO)
+    {
+        currFile = fs->file_queue_head;
+        while (currFile)
+        {
+            if (currFile != toAdd && (*replace_algo[fs->replacement_algo])(currFile, toEvict) > 0)
+            {
+                toEvict = currFile;
+            }
+            currFile = currFile->next;
+        }
+    }
+
+    return toEvict;
+}
+
+/**
+ * @brief Aggiunge al buffer 'buf' di dimensione corrente 'bufCurrSize' bytes un file.
+ * Si assume la mutua esclusione sul file
+ *
+ * @param file file da aggiungere
+ * @param buf buffer di file
+ * @param bufCurrSize dimensione attuale del buffer
+ * @return 0 successo, -1 altrimenti e errno settato
+ */
+static int copyFileToBuffer(File *file, char **buf, size_t *bufCurrSize)
+{
+    size_t path_len,
+        bufNewSize;
+
+    void *tmp;
+
+    if (!file)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    path_len = strlen(file->path) + 1;
+
+    bufNewSize = *bufCurrSize + sizeof(size_t) + path_len + sizeof(size_t) + file->dataSize;
+
+    tmp = realloc(*buf, bufNewSize);
+
+    if (!tmp)
+    {
+        errno = ENOMEM;
+        free(*buf);
+        return -1;
+    }
+
+    *buf = tmp;
+
+    memcpy(*buf + *bufCurrSize, &path_len, sizeof(size_t)); // Copio la dimensione del path del file
+
+    memcpy(*buf + *bufCurrSize + sizeof(size_t), file->path, path_len); // Copio il path del file
+
+    memcpy(*buf + *bufCurrSize + sizeof(size_t) + path_len, &(file->dataSize), sizeof(size_t)); // Copio la dimensione del file
+
+    memcpy(*buf + bufNewSize - (file->dataSize), file->data, file->dataSize); // Copio il file
+
+    *bufCurrSize = bufNewSize;
+
+    return 0;
+}
 /**
  * @brief Alloca e inizializza un file con pathname @param path pathname del file.
  *
@@ -62,12 +140,14 @@ static File *initFile(const char *path)
     // inizialmente il file non è in stato di locked
     newFile->lockedBy = 0;
 
+    newFile->prev = newFile->next = NULL;
+
     return newFile;
 }
 
 /**
  * @brief Dealloca il file puntato da 'filePtr'. Si assume che il chiamante abbia la mutua esclusione sul file.
- * 
+ *
  * @param filePtr puntatore al file
  */
 static void freeFile(void *filePtr)
@@ -76,7 +156,7 @@ static void freeFile(void *filePtr)
 
     if (file->waitingForLock)
         deleteList(&(file->waitingForLock));
-        
+
     if (file->openedBy)
         deleteList(&(file->openedBy));
 
@@ -101,14 +181,14 @@ static void freeFile(void *filePtr)
 }
 
 /**
- * @brief Rimuove il file dal filesystem 'fs' e salva la lista dei client che attendevano la lock sul puntatore 'signalForLock' che dovra' essere deallocata dal chiamante. 
+ * @brief Rimuove il file dal filesystem 'fs' e salva la lista dei client che attendevano la lock sul puntatore 'signalForLock' che dovra' essere deallocata dal chiamante.
  * Si assume che il chiamante abbia la mutua esclusione sullo storage.
- * 
- * @param fs puntatore al filesystem 
- * @param file file da rimuovere 
+ *
+ * @param fs puntatore al filesystem
+ * @param file file da rimuovere
  * @param signalForLock puntatore alla lista di client che attendono la lock sul file
  */
-static void deleteFile(Filesystem *fs, File *file, fdList *signalForLock)
+static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
 {
     LOCK(&(file->fileLock));
 
@@ -117,10 +197,20 @@ static void deleteFile(Filesystem *fs, File *file, fdList *signalForLock)
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
+    if (file->prev)
+        file->prev->next = file->next;
+    else
+        fs->file_queue_head = file->next;
+
+    if (file->next)
+        file->next->prev = file->prev;
+    else
+        fs->file_queue_tail = file->prev;
+
     if (file->waitingForLock && signalForLock)
     {
-        signalForLock = file->waitingForLock;
-        file->waitingForLock = NULL;
+        *signalForLock = file->waitingForLock->head;
+        file->waitingForLock->head = NULL;
     }
 
     if (file->openedBy)
@@ -142,7 +232,7 @@ static File *getFile(Filesystem *fs, const char *path)
 
 /**
  * @brief aggiunge un file al filesystem 'fs'. Si assume di avere la mutua esclusione sia sul filesytem che sul file.
- * 
+ *
  * @param fs filesytem a cui aggiungere il file
  * @param file file da aggiungere
  * @return 0 se successo, -1 altrimenti e errno settato.
@@ -161,16 +251,31 @@ static int addFile(Filesystem *fs, File *file)
         return -1;
     }
 
+    file->insertionTime = time(NULL); // Fifo
+    file->lastUsed = time(NULL);      // Lru
+    file->usedTimes = 1;              // Lfu
+    file->referenceBit = 1;           // Second-chance
+
+    if (!fs->file_queue_head)
+    {
+        fs->file_queue_head = file;
+    }
+    else
+    {
+        file->prev = fs->file_queue_tail;
+        if (fs->file_queue_tail)
+            fs->file_queue_tail->next = file;
+    }
+
+    fs->file_queue_tail = file;
+
     fs->currFiles++;
     fs->absMaxFiles = MAX(fs->absMaxFiles, fs->currFiles);
-
-    fs->currMemory += file->dataSize;
-    fs->absMaxMemory = MAX(fs->absMaxMemory, fs->currMemory);
 
     return 0;
 }
 
-Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory)
+Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory, int replacement_algo)
 {
     int errnum;
 
@@ -191,7 +296,7 @@ Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory)
     newFilesystem->currMemory = 0;
     newFilesystem->absMaxMemory = 0;
 
-    
+    newFilesystem->replacement_algo = replacement_algo;
 
     if ((errnum = pthread_mutex_init(&(newFilesystem->fileSystemLock), NULL)) != 0)
     {
@@ -206,6 +311,8 @@ Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory)
         errno = ENOMEM;
         return NULL;
     }
+
+    newFilesystem->file_queue_head = newFilesystem->file_queue_tail = NULL;
 
     return newFilesystem;
 }
@@ -236,8 +343,11 @@ void printFileSystem(Filesystem *fs)
     icl_hash_foreach(fs->hastTable, tmpIndex, tmpEntry, tmpFileName, tmpFile, printf("File: %s, dataSize: %ld\n", tmpFileName, tmpFile->dataSize));
 }
 
-int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientFd)
+int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **signalForLock, int clientFd)
 {
+    File *file,
+        *toEvict;
+
     if (!fs || !path || (clientFd <= 0))
     {
         errno = EINVAL;
@@ -249,7 +359,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
 
     LOCK(&(fs->fileSystemLock));
 
-    File *file = getFile(fs, path);
+    file = getFile(fs, path);
 
     // il file non esiste, ma non ho settato la flag O_CREATE
     if (!file && !create)
@@ -270,17 +380,18 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
     // Dopo i check precedenti qua sono sicuro di creare un nuovo file solo se non esiste
     if (create)
     {
+        if (fs->currFiles == fs->maxFiles)
+        {
+            toEvict = evictFile(fs, NULL);
+            deleteFile(fs, toEvict, signalForLock);
+        }
+
         file = initFile(path);
 
         if (!file)
         {
             UNLOCK(&(fs->fileSystemLock));
             return -1;
-        }
-
-        if (fs->currFiles == fs->maxFiles)
-        {
-            // TODO: Expell file from storage
         }
 
         addFile(fs, file);
@@ -316,9 +427,19 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, int clientF
     return 0;
 }
 
-int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, int clientFd)
+int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, void **evicted_files, size_t *evicted_files_size, fdNode **signalForLock, int clientFd)
 {
-    if (!fs || !path || !data || (dataSize <= 0) || (clientFd <= 0))
+    File *file,
+        *toEvict;
+
+    char *fileData,
+        *toEvict_buf = NULL;
+
+    size_t toEvict_size = 0;
+
+    fdNode *tmp_signalForLock;
+
+    if (!fs || !path || !data || dataSize <= 0 || clientFd <= 0)
     {
         errno = EINVAL;
         return -1;
@@ -326,7 +447,7 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     LOCK(&(fs->fileSystemLock));
 
-    File *file = getFile(fs, path);
+    file = getFile(fs, path);
 
     // il file che voglio scrivere non esiste
     if (!file)
@@ -342,35 +463,28 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     if ((file->lockedBy && file->lockedBy != clientFd) || !findNode(file->openedBy, clientFd))
     {
         UNLOCK(&(file->fileLock));
+        UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
         return -1;
     }
 
-    // I dati da scrivere sono troppi per lo storage
-    if ((file->dataSize + dataSize) > fs->maxMemory)
-    {
-        UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
-        errno = EFBIG;
-        return -1;
-    }
-
-    // attendo finché non ci sono lettori  o scrittori per scrivere il file
-    while (file->nReaders > 0 || file->isWritten)
+    // attendo finché non ci sono piu' lettori per scrivere il file
+    while (file->nReaders > 0)
     {
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
     file->isWritten = 1;
 
+    UPDATE_FILE_REFERENCE(file);
+
     UNLOCK(&(file->fileLock));
 
-    char *fileData;
-
-    while (fs->currMemory + dataSize > fs->maxMemory)
+    // I dati da scrivere sono troppi per lo storage
+    if ((file->dataSize + dataSize) > fs->maxMemory)
     {
-        // TODO: Expell file from storage
-        break;
+        errno = EFBIG;
+        goto cleanup;
     }
 
     fileData = calloc((file->dataSize + dataSize), sizeof(*fileData));
@@ -380,6 +494,20 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         errno = ENOMEM;
         goto cleanup;
     }
+
+    while (fs->currMemory + dataSize > fs->maxMemory)
+    {
+        toEvict = evictFile(fs, file);
+
+        copyFileToBuffer(toEvict, &toEvict_buf, &toEvict_size);
+
+        deleteFile(fs, toEvict, &tmp_signalForLock);
+
+        concanateList(&((*signalForLock)), tmp_signalForLock);
+    }
+
+    *evicted_files = toEvict_buf;
+    *evicted_files_size = toEvict_size;
 
     // se il file ha già dei dati copio questi ultimi prima di copiare i dati nuovi
     if (file->data)
@@ -393,6 +521,9 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     file->data = fileData;
     file->dataSize += dataSize;
 
+    fs->currMemory += file->dataSize;
+    fs->absMaxMemory = MAX(fs->absMaxMemory, fs->currMemory);
+
 cleanup:
     LOCK(&(file->fileLock));
 
@@ -402,6 +533,7 @@ cleanup:
 
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));
+
     return errno ? -1 : 0;
 }
 
@@ -444,6 +576,8 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
     }
 
     file->nReaders++;
+
+    UPDATE_FILE_REFERENCE(file);
 
     UNLOCK(&(file->fileLock));
 
@@ -512,30 +646,8 @@ int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, siz
     readCount = 0;
     while (currFile && (readCount < upperLimit || upperLimit <= 0))
     {
-        size_t path_len = strlen(currFile->path) + 1;
-
-        size_t bufNewSize = bufCurrSize + sizeof(size_t) + path_len + sizeof(size_t) + currFile->dataSize;
-
-        void *tmp = realloc(file_data_buf, bufNewSize);
-        if (!tmp)
-        {
-            UNLOCK(&(fs->fileSystemLock));
-            errno = ENOMEM;
-            free(file_data_buf);
-            return -1;
-        }
-
-        file_data_buf = tmp;
-
-        memcpy(file_data_buf + bufCurrSize, &path_len, sizeof(size_t)); // Copio la dimensione del path del file
-
-        memcpy(file_data_buf + bufCurrSize + sizeof(size_t), currFile->path, path_len); // Copio il path del file
-
-        memcpy(file_data_buf + bufCurrSize + sizeof(size_t) + path_len, &(currFile->dataSize), sizeof(size_t)); // Copio la dimensione del file
-
-        memcpy((file_data_buf + bufNewSize - (currFile->dataSize)), currFile->data, currFile->dataSize); // Copio il file
-
-        bufCurrSize = bufNewSize;
+        if (copyFileToBuffer(currFile, &file_data_buf, &bufCurrSize) == -1)
+            break;
 
         readCount++;
 
@@ -588,12 +700,14 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
 
     if (file->lockedBy && file->lockedBy != clientFd)
     {
-        CHECK_AND_ACTION(insertNode, ==, -1, perror("insertNode"); pthread_exit((void*)EXIT_FAILURE),file->waitingForLock, clientFd);
+        CHECK_AND_ACTION(insertNode, ==, -1, perror("insertNode"); pthread_exit((void *)EXIT_FAILURE), file->waitingForLock, clientFd);
         UNLOCK(&(fs->fileSystemLock));
         return -2;
     }
 
     file->lockedBy = clientFd;
+
+    UPDATE_FILE_REFERENCE(file);
 
     BCAST(&(file->readWrite));
 
@@ -649,6 +763,8 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
     if (nextLock)
         *nextLockFd = file->lockedBy = nextLock->fd;
 
+    UPDATE_FILE_REFERENCE(file);
+
     BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
@@ -656,7 +772,7 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
     return 0;
 }
 
-int removeFileHandler(Filesystem *fs, const char *path, fdList *signalForLock, int clientFd)
+int removeFileHandler(Filesystem *fs, const char *path, fdNode **signalForLock, int clientFd)
 {
     File *file;
 
@@ -719,6 +835,8 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
     fdToClose = getNode(file->openedBy, clientFd);
     deleteNode(fdToClose);
 
+    UPDATE_FILE_REFERENCE(file);
+
     BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
@@ -727,7 +845,7 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
     return 0;
 }
 
-int clientExitHandler(Filesystem *fs, fdList *signalForLock, int clientFd)
+int clientExitHandler(Filesystem *fs, fdNode **signalForLock, int clientFd)
 {
     File *currFile;
 
@@ -774,21 +892,18 @@ int clientExitHandler(Filesystem *fs, fdList *signalForLock, int clientFd)
 
             if (nextNode)
             {
-                insertNode(signalForLock, nextNode->fd);
+                nextNode->next = *signalForLock;
+                (*signalForLock)->prev = nextNode;
+                (*signalForLock) = nextNode;
                 currFile->lockedBy = nextNode->fd;
-                deleteNode(nextNode);
             }
         }
 
         tmp = getNode(currFile->waitingForLock, clientFd);
-
-        if (tmp)
-            deleteNode(tmp);
+        deleteNode(tmp);
 
         tmp = getNode(currFile->openedBy, clientFd);
-
-        if (tmp)
-            deleteNode(tmp);
+        deleteNode(tmp);
 
         UNLOCK(&(currFile->fileLock));
 

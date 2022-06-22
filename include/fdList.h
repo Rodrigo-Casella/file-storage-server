@@ -30,5 +30,6 @@ fdNode *popNode(fdList *list);
  */
 int findNode(fdList *list, int key);
 int insertNode(fdList *list, int fd);
+void concanateList(fdNode **dest_head, fdNode *src_head);
 
 #endif

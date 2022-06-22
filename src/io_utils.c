@@ -227,10 +227,9 @@ char *readFileFromServer(int fd_skt, size_t *file_len)
     return errno ? NULL : file_data;
 }
 
-int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir)
+int readMultipleFilesFromServer(int fd_skt, const char *save_dir)
 {
-    int files_read,
-        failToWrite;
+    int files_read;
         
     char *file_path,
         *file_data,
@@ -242,8 +241,6 @@ int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir)
     files_read = 0;
     while (1)
     {
-        failToWrite = 0;
-
         file_data = save_dir_path_buf = NULL;
 
         file_path_len = file_len = 0;
@@ -270,16 +267,13 @@ int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir)
 
         if (save_dir)
             if (writeFileToDir(save_dir, file_path, file_data, file_len) == -1)
-                failToWrite = 1;
+                perror("writeFileToDir");
 
         free(file_path);
         free(file_data);
 
-        if (!failToWrite)
-            files_read++;
-
-        if (n != 0 && files_read >= n)
-            break;
+        
+        files_read++;
     }
 
     return files_read;

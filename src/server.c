@@ -24,6 +24,9 @@
 #define DFL_MAXFILES 10
 #define DFL_MAXMEMORY 100
 #define DFL_BACKLOG 5
+#define DFL_REPL_ALG 0
+
+#define QUEUE_LEN 10
 
 #define GET_NUMERIC_SETTING_VAL(settings, key, val, default, op, cond)              \
     if (1)                                                                          \
@@ -103,16 +106,21 @@ int main(int argc, char const *argv[])
         maxMemory,
         nThreads;
 
+    int replacment_algo;
+
     GET_NUMERIC_SETTING_VAL(settings, "THREADS", nThreads, DFL_THREADS, <=, 0);
     GET_NUMERIC_SETTING_VAL(settings, "MAXMEMORY", maxMemory, DFL_MAXMEMORY, <=, 0);
     GET_NUMERIC_SETTING_VAL(settings, "MAXFILES", maxFiles, DFL_MAXFILES, <=, 0);
+    GET_NUMERIC_SETTING_VAL(settings, "REPL_ALG", replacment_algo, DFL_REPL_ALG, <, 0 || replacment_algo > 3);
     GET_SETTING_VAL(settings, "SOCKNAME", sockname, DFL_SOCKET);
 
     freeSettingList(&settings);
 
     // Creo la coda per comunicare con i thread worker
     BQueue_t *client_fd_queue = NULL;
-    client_fd_queue = initBQueue(10);
+    client_fd_queue = initBQueue(QUEUE_LEN);
+    if (!client_fd_queue)
+        exit(EXIT_FAILURE);
 
     // Creo la pipe con cui i thread worker comunicherranno con il manager
     int workerManagerPipe[2];
@@ -123,10 +131,17 @@ int main(int argc, char const *argv[])
 
     // Inizializzo il filesystem
     Filesystem *fs = NULL;
-    fs = initFileSystem(maxFiles, maxMemory);
+    fs = initFileSystem(maxFiles, maxMemory, replacment_algo);
+
+    if (!fs)
+        exit(EXIT_FAILURE);
 
     // Passo i riferimenti alla struttura per gli argomenti dei thread
     ThreadArgs *th_args = malloc(sizeof(*th_args));
+
+    if (!th_args)
+        exit(EXIT_FAILURE);
+    
     th_args->queue = client_fd_queue;
     th_args->write_end_pipe_fd = workerManagerPipe[1];
     th_args->fs = fs;

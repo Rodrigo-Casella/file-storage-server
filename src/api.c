@@ -171,7 +171,8 @@ int openFile(const char *pathname, int flags)
 
 int writeFile(const char *pathname, const char *dirname)
 {
-    int op = WRITE_FILE;
+    int op = WRITE_FILE,
+        files_read;
 
     char *pathname_buf,
         *file_data_buf;
@@ -221,6 +222,15 @@ int writeFile(const char *pathname, const char *dirname)
     SERVER_RESPONSE(writeFile, pathname);
 
     PRINT_RDWR_BYTES(file_len, scritti);
+
+    if (!errno)
+    {
+        files_read = readMultipleFilesFromServer(fd_skt, dirname);
+
+        if (toPrint)
+            printf("Il server ha inviato %d files.\n", files_read);
+    }
+
     return errno ? -1 : 0;
 }
 
@@ -320,7 +330,7 @@ int readNFiles(int N, const char *dirname)
     if (errno)
         return -1;
 
-    int files_read = readMultipleFilesFromServer(fd_skt, N, dirname);
+    int files_read = readMultipleFilesFromServer(fd_skt, dirname);
 
     if (toPrint)
         printf("Ho letto %d files dal server.\n", files_read);

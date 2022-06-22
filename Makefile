@@ -14,7 +14,7 @@ OBJIOUTILS = $(addprefix $(ODIR)/, $(_OBJIOUTILS))
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o
+_OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o compare_func.o
 OBJSERVERPTHREAD = $(addprefix $(ODIR)/, $(_OBJSERVERPTHREAD))
 _OBJSERVER = configParser.o icl_hash.o fdList.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
@@ -61,4 +61,4 @@ $(ODIR):
 	mkdir -p $(ODIR)
 
 clean:
-	rm -f *~ $(ODIR)/*.o $(BDIR)/*
+	rm -rf $(ODIR)/*.o $(BDIR)/*

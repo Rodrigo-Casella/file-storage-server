@@ -41,12 +41,11 @@ char *readFileFromPath(const char *path, size_t *file_len);
 char *readFileFromServer(int fd_skt, size_t *file_len);
 
 /**
- * @brief Legge fino a n file dal server, se n <= 0 allora legge tutti i file presenti sul server e li salva in save_dir (opzionale).
- *
- * @param n limite superio di file da leggere
+ * @brief Legge i file inviati dal server e li salva in save_dir (opzionale).
+ * 
  * @param save_dir cartella in memoria secondaria su cui salvare i file letti
  * @return il numero di file letti dal server, -1 se c'è stato un errore.
  */
-int readMultipleFilesFromServer(int fd_skt, int n, const char *save_dir);
+int readMultipleFilesFromServer(int fd_skt, const char *save_dir);
 
 #endif
