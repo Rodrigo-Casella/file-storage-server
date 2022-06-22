@@ -65,13 +65,18 @@ static File *initFile(const char *path)
     return newFile;
 }
 
+/**
+ * @brief Dealloca il file puntato da 'filePtr'. Si assume che il chiamante abbia la mutua esclusione sul file.
+ * 
+ * @param filePtr puntatore al file
+ */
 static void freeFile(void *filePtr)
 {
     File *file = (File *)filePtr;
 
     if (file->waitingForLock)
         deleteList(&(file->waitingForLock));
-
+        
     if (file->openedBy)
         deleteList(&(file->openedBy));
 
@@ -95,6 +100,14 @@ static void freeFile(void *filePtr)
         free(file);
 }
 
+/**
+ * @brief Rimuove il file dal filesystem 'fs' e salva la lista dei client che attendevano la lock sul puntatore 'signalForLock' che dovra' essere deallocata dal chiamante. 
+ * Si assume che il chiamante abbia la mutua esclusione sullo storage.
+ * 
+ * @param fs puntatore al filesystem 
+ * @param file file da rimuovere 
+ * @param signalForLock puntatore alla lista di client che attendono la lock sul file
+ */
 static void deleteFile(Filesystem *fs, File *file, fdList *signalForLock)
 {
     LOCK(&(file->fileLock));
@@ -105,7 +118,10 @@ static void deleteFile(Filesystem *fs, File *file, fdList *signalForLock)
     }
 
     if (file->waitingForLock && signalForLock)
+    {
         signalForLock = file->waitingForLock;
+        file->waitingForLock = NULL;
+    }
 
     if (file->openedBy)
         deleteList(&(file->openedBy));
@@ -124,6 +140,13 @@ static File *getFile(Filesystem *fs, const char *path)
     return (File *)icl_hash_find(fs->hastTable, (void *)path);
 }
 
+/**
+ * @brief aggiunge un file al filesystem 'fs'. Si assume di avere la mutua esclusione sia sul filesytem che sul file.
+ * 
+ * @param fs filesytem a cui aggiungere il file
+ * @param file file da aggiungere
+ * @return 0 se successo, -1 altrimenti e errno settato.
+ */
 static int addFile(Filesystem *fs, File *file)
 {
     if (!fs || !file)
@@ -133,7 +156,10 @@ static int addFile(Filesystem *fs, File *file)
     }
 
     if (!icl_hash_insert(fs->hastTable, file->path, file))
+    {
+        errno = ENOMEM;
         return -1;
+    }
 
     fs->currFiles++;
     fs->absMaxFiles = MAX(fs->absMaxFiles, fs->currFiles);
@@ -144,8 +170,10 @@ static int addFile(Filesystem *fs, File *file)
     return 0;
 }
 
-Filesystem *initFileSystem(long maxFiles, long maxMemory)
+Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory)
 {
+    int errnum;
+
     if (maxFiles <= 0 || maxMemory <= 0)
     {
         errno = EINVAL;
@@ -159,23 +187,25 @@ Filesystem *initFileSystem(long maxFiles, long maxMemory)
     newFilesystem->currFiles = 0;
     newFilesystem->absMaxFiles = 0;
 
-    newFilesystem->maxMemory = maxMemory;
+    newFilesystem->maxMemory = maxMemory * 1000 * 1000;
     newFilesystem->currMemory = 0;
     newFilesystem->absMaxMemory = 0;
+
+    
+
+    if ((errnum = pthread_mutex_init(&(newFilesystem->fileSystemLock), NULL)) != 0)
+    {
+        errno = errnum;
+        return NULL;
+    }
 
     newFilesystem->hastTable = icl_hash_create((int)(maxFiles * (0.75F)), NULL, NULL);
     if (!newFilesystem->hastTable)
     {
-        fprintf(stderr, "Errore creazione hash table per il filesystem\n");
+        pthread_mutex_destroy(&(newFilesystem->fileSystemLock));
+        errno = ENOMEM;
         return NULL;
     }
-
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_mutex_init, !=, 0, errnum,
-                         fprintf(stderr, "pthread_mutex_init: %s\n", strerror(errnum));
-                         errno = errnum;
-                         return NULL,
-                                &(newFilesystem->fileSystemLock), NULL);
 
     return newFilesystem;
 }
@@ -685,16 +715,11 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
-    // il file non è stato aperto dal client
-    if (!(fdToClose = getNode(file->openedBy, clientFd)))
-    {
-        UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
-        errno = EPERM;
-        return -1;
-    }
-
+    // Rimuovo l'fd del client dalla lista di quelli aperti.
+    fdToClose = getNode(file->openedBy, clientFd);
     deleteNode(fdToClose);
+
+    BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));

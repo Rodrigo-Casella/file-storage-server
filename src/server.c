@@ -3,25 +3,56 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <signal.h>
+#include <unistd.h>
 
-#include "../include/utils.h"
-#include "../include/configParser.h"
 #include "../include/boundedqueue.h"
-#include "../include/worker.h"
+#include "../include/configParser.h"
 #include "../include/filesystem.h"
 #include "../include/message_protocol.h"
+#include "../include/utils.h"
+#include "../include/worker.h"
 
-#define DFL_SOCKET "./mysock"
+#define DFL_SOCKET "./LSOfiletorage.sk"
 #define DFL_THREADS 2
-#define DFL_BACKLOG 50
+#define DFL_MAXFILES 10
+#define DFL_MAXMEMORY 100
+#define DFL_BACKLOG 5
+
+#define GET_NUMERIC_SETTING_VAL(settings, key, val, default, op, cond)              \
+    if (1)                                                                          \
+    {                                                                               \
+        errno = 0;                                                                  \
+        if ((val = getNumericValue(settings, key)) == -1 || val op cond)            \
+        {                                                                           \
+            fprintf(stderr, "Errore valore " #key ", usando valore di default.\n"); \
+            val = default;                                                          \
+        }                                                                           \
+    }
+
+#define GET_SETTING_VAL(settings, key, val, default)                                \
+    if (1)                                                                          \
+    {                                                                               \
+        if ((val = getValue(settings, key)) == NULL)                                \
+        {                                                                           \
+            fprintf(stderr, "Errore valore " key ", usando valore di default.\n"); \
+            val = strdup(default);                                                  \
+            if (!val)                                                               \
+            {                                                                       \
+                perror("strdup " default);                                          \
+                if (settings)                                                       \
+                    freeSettingList(&settings);                                     \
+                                                                                    \
+                exit(EXIT_FAILURE);                                                 \
+            }                                                                       \
+        }                                                                           \
+    }
 
 int hardQuit, softQuit;
 
@@ -66,13 +97,20 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    char *test = NULL;
-    printf("Test: %s\n", (test = getValue(settings, "TEST")));
-    free(test);
+    char *sockname;
+
+    size_t maxFiles,
+        maxMemory,
+        nThreads;
+
+    GET_NUMERIC_SETTING_VAL(settings, "THREADS", nThreads, DFL_THREADS, <=, 0);
+    GET_NUMERIC_SETTING_VAL(settings, "MAXMEMORY", maxMemory, DFL_MAXMEMORY, <=, 0);
+    GET_NUMERIC_SETTING_VAL(settings, "MAXFILES", maxFiles, DFL_MAXFILES, <=, 0);
+    GET_SETTING_VAL(settings, "SOCKNAME", sockname, DFL_SOCKET);
 
     freeSettingList(&settings);
 
-    // Creo la coda per comunicare con i thread worker 
+    // Creo la coda per comunicare con i thread worker
     BQueue_t *client_fd_queue = NULL;
     client_fd_queue = initBQueue(10);
 
@@ -80,12 +118,12 @@ int main(int argc, char const *argv[])
     int workerManagerPipe[2];
     SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
     // Ignoro SIGPIPE
-    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction) {.sa_handler=SIG_IGN}, NULL);
+    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction){.sa_handler = SIG_IGN}, NULL);
     SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
 
     // Inizializzo il filesystem
     Filesystem *fs = NULL;
-    fs = initFileSystem(100, 1000000000);
+    fs = initFileSystem(maxFiles, maxMemory);
 
     // Passo i riferimenti alla struttura per gli argomenti dei thread
     ThreadArgs *th_args = malloc(sizeof(*th_args));
@@ -93,15 +131,16 @@ int main(int argc, char const *argv[])
     th_args->write_end_pipe_fd = workerManagerPipe[1];
     th_args->fs = fs;
 
-    // Alloco i thread specificati e invoco la loro routine
-    pthread_t *workers = malloc(sizeof(*workers) * DFL_THREADS);
+    // Alloco i threads e invoco la loro routine
+    pthread_t *workers = calloc(nThreads, sizeof(pthread_t));
+
+    if (!workers)
+        exit(EXIT_FAILURE);
 
     for (int i = 0; i < DFL_THREADS; i++)
     {
-        int err = 0;
-        CHECK_RET_AND_ACTION(pthread_create, !=, 0, err,
-                             fprintf(stderr, "pthread_create: %s\n", strerror(err));
-                             exit(EXIT_FAILURE), &workers[i], NULL, &processRequest, (void *)th_args);
+        if (pthread_create(&workers[i], NULL, &processRequest, (void *)th_args) != 0)
+            exit(EXIT_FAILURE);
     }
 
     // Imposto l'handler per la gestione dei segnali SIGINT, SIGQUIT e SIGHUP
@@ -116,7 +155,7 @@ int main(int argc, char const *argv[])
     // Imposto l'indirizzo della socket del server
     struct sockaddr_un server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
-    strncpy(server_addr.sun_path, DFL_SOCKET, UNIX_PATH_MAX);
+    strncpy(server_addr.sun_path, sockname, UNIX_PATH_MAX);
     server_addr.sun_family = AF_UNIX;
 
     // Fd del server e fd massima per la select
@@ -134,7 +173,7 @@ int main(int argc, char const *argv[])
     FD_ZERO(&master_set);
     FD_SET(listen_fd, &master_set);
     FD_SET(workerManagerPipe[0], &master_set);
-    fd_max = MAX( listen_fd, workerManagerPipe[0]);
+    fd_max = MAX(listen_fd, workerManagerPipe[0]);
 
     // Eseguo la bind del socket con l'indirizzo del server e mi metto in ascolto di richieste di connessione
     SYSCALL_EQ_ACTION(bind, -1, exit(EXIT_FAILURE), listen_fd, (const struct sockaddr *)&server_addr, sizeof(server_addr));
@@ -164,15 +203,16 @@ int main(int argc, char const *argv[])
 
         for (int fd = 0; fd <= fd_max; fd++)
         {
-            
+
             if (FD_ISSET(fd, &working_set))
             {
                 if (fd == listen_fd) // richiesta di connessione
                 {
-                    int fd_client; 
+                    int fd_client;
                     SYSCALL_RET_EQ_ACTION(accept, -1, fd_client, continue, listen_fd, NULL, 0);
 
-                    if (softQuit) {
+                    if (softQuit)
+                    {
                         SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), fd_client);
                         continue;
                     }
@@ -187,10 +227,11 @@ int main(int argc, char const *argv[])
                 if (fd == workerManagerPipe[0]) // messaggio da un thread worker
                 {
                     int fd_sent_from_worker;
-                    
+
                     CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], &fd_sent_from_worker, sizeof(int));
 
-                    if(fd_sent_from_worker == 0) {
+                    if (fd_sent_from_worker == 0)
+                    {
                         if (--connected_clients == 0 && softQuit)
                             goto shutdown;
 
@@ -201,7 +242,7 @@ int main(int argc, char const *argv[])
                     fd_max = MAX(fd_max, fd_sent_from_worker);
                     continue;
                 }
-                
+
                 // Un fd di un client già connesso è pronto per la lettura, quindi lo elimino dal master fd_set e lo spedisco ai thread worker
                 FD_CLR(fd, &master_set);
 
@@ -233,10 +274,16 @@ shutdown:
                              exit(EXIT_FAILURE), workers[i], NULL);
     }
 
+    SYSCALL_EQ_ACTION(unlink, -1, exit(EXIT_FAILURE), sockname);
+    free(sockname);
+
+    SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), workerManagerPipe[0]);
+    SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), workerManagerPipe[1]);
+
     free(workers);
     free(th_args);
     deleteBQueue(client_fd_queue, NULL);
-    //stampo i contenuti del filesystem e lo elimino
+    // stampo i contenuti del filesystem e lo elimino
     printFileSystem(fs);
     deleteFileSystem(fs);
     return 0;

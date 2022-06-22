@@ -1,5 +1,15 @@
-# Ignora le riche che iniziano con '#'
+# Ignora le righe che iniziano con '#'
 
 # Oppure le righe vuote
 
-TEST=stringa di test
+# Numero di threads usati dal server
+THREADS=2
+
+# Memoria massima del server in Mbytes
+MAXMEMORY=128
+
+# Numero massimo di files del server
+MAXFILES=10
+
+# Nome della socket
+SOCKNAME=mysock.sk

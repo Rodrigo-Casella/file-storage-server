@@ -50,14 +50,11 @@
     }
 
 #define SIGNAL_WAITING_FOR_LOCK(signalForLock, responseCode, managerFd)                                                          \
-    while (signalForLock->head)                                                                                                  \
+    while (signalForLock && signalForLock->head)                                                                                 \
     {                                                                                                                            \
         SEND_RESPONSE_CODE(signalForLock->head->fd, responseCode);                                                               \
         CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(signalForLock->head->fd), sizeof(int)); \
-        fdNode *tmp = signalForLock->head;                                                                                       \
-        signalForLock->head = signalForLock->head->next;                                                                         \
-        if (tmp->next)                                                                                                           \
-            tmp->next->prev = tmp->prev;                                                                                         \
+        fdNode *tmp = popNode(signalForLock);                                                                                    \
         deleteNode(tmp);                                                                                                         \
     }
 
@@ -170,6 +167,7 @@ void *processRequest(void *args)
             SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, SUCCESS, managerFd);
+            deleteList(&signalForLock);
 
             *client_fd = 0;
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
@@ -307,6 +305,7 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
+            deleteList(&signalForLock);
             break;
         case CLOSE_FILE:
             if (closeFileHandler(fs, request_payload, *client_fd) == -1)

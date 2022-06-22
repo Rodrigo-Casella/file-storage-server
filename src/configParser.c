@@ -6,25 +6,19 @@
 #include "../include/configParser.h"
 #include "../include/utils.h"
 
-static int readAndAddSetting(char *line, Setting **head)
+static int readAndAddSetting(char *setting, Setting **head)
 {
-    Setting *newSetting = NULL;
-    CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting, perror("malloc newSetting"); return -1, sizeof(*newSetting));
+    Setting *newSetting;
 
-    char *token = NULL, *save_ptr = NULL;
-    int token_length = 0;
+    char *token;
 
-    CHECK_RET_AND_ACTION(strtok_r, ==, NULL, token, fprintf(stderr, "Errore leggendo chiave impostazione\n"); return -1, line, "=", &save_ptr);
-    token_length = strlen(token) + 1;
+    CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting, errno = ENOMEM; return -1, sizeof(*newSetting));
 
-    CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting->key, perror("malloc chiave"), sizeof(char) * token_length);
-    strncpy(newSetting->key, token, token_length);
+    CHECK_RET_AND_ACTION(strtok, ==, NULL, token, errno = ENODATA; return -1, setting, "=");
+    CHECK_RET_AND_ACTION(strdup, ==, NULL, newSetting->key, return -1, token);
 
-    CHECK_RET_AND_ACTION(strtok_r, ==, NULL, token, fprintf(stderr, "Errore leggendo valore impostazione\n"); return -1, NULL, "=", &save_ptr);
-    token_length = strlen(token) + 1;
-
-    CHECK_RET_AND_ACTION(malloc, ==, NULL, newSetting->value, perror("malloc valore"); return -1, sizeof(char) * token_length);
-    strncpy(newSetting->value, token, token_length);
+    CHECK_RET_AND_ACTION(strtok, ==, NULL, token, errno = ENODATA; return -1, NULL, "=");
+    CHECK_RET_AND_ACTION(strdup, ==, NULL, newSetting->value, return -1, token);
     
     newSetting->next = *head;
     *head = newSetting;
@@ -38,9 +32,9 @@ Setting *parseFile(const char *path)
 
     FILE *fp = NULL;
 
-    CHECK_RET_AND_ACTION(fopen, ==, NULL, fp, perror("fopen"); return NULL, path, "r");
+    CHECK_RET_AND_ACTION(fopen, ==, NULL, fp, return NULL, path, "r");
 
-    char buf[BUF_SIZE];
+    char buf[_SC_LINE_MAX];
 
     while (fgets(buf, BUF_SIZE, fp))
     {
@@ -48,15 +42,17 @@ Setting *parseFile(const char *path)
             continue;
 
         buf[strcspn(buf, "\n")] = '\0';
-        readAndAddSetting(buf, &settings);
+        if (readAndAddSetting(buf, &settings) == -1)
+        {
+            SAVE_ERRNO_AND_RETURN(freeSettingList(&settings); fclose(fp), NULL);
+        }
     }
     if (feof(fp) == 0)
     {
-        fprintf(stderr, "Errore fgets\n");
-        return NULL;
+        SAVE_ERRNO_AND_RETURN(freeSettingList(&settings); fclose(fp), NULL);
     }
 
-    CHECK_AND_ACTION(fclose, ==, -1, perror("fclose"); return NULL, fp);
+    CHECK_AND_ACTION(fclose, ==, -1, return NULL, fp);
 
     return settings;
 }
@@ -67,14 +63,14 @@ char *getValue(Setting *settings, const char *key)
 
     while (curr)
     {
-        if (strncmp(key, curr->key, strlen(key) + 1) == 0)
+        if (strncmp(key, curr->key, strlen(key)) == 0)
         {
-            char *value = strndup (curr->value, strlen(curr->value) + 1);
+            char *value = strdup (curr->value);
             return value;
         }
         curr = curr->next;
     }
-
+    errno = ENOENT;
     return NULL;
 }
 
@@ -88,9 +84,7 @@ long getNumericValue(Setting *settings, const char *key)
     long nValue = -1;
 
     if (isNumber(value, &nValue) != 0)
-    {
-        perror("isNumber");
-    }
+        errno = EINVAL;
 
     free(value);
     return nValue;

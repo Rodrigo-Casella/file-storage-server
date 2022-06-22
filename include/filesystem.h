@@ -26,9 +26,9 @@ typedef struct file
 
 typedef struct filesystem
 {
-    long maxFiles;
-    long currFiles;
-    long absMaxFiles;
+    size_t maxFiles;
+    size_t currFiles;
+    size_t absMaxFiles;
 
     size_t maxMemory;
     size_t currMemory;
@@ -40,16 +40,28 @@ typedef struct filesystem
 } Filesystem;
 
 /**
- * @brief Alloco e inizializzo un filesystem.
+ * @brief Alloca e inizializza un filesystem con capacita' massima di 'maxFiles' files e una memoria massima di 'maxMemory' Mbytes.
  *
  * @param maxFiles numero massimo di file che possono essere memorizzati nel filesystem
- * @param maxMemory spazio massimo che può occupare il filesystem (in bytes)
+ * @param maxMemory spazio massimo che può occupare il filesystem (in Mbytes)
  *
- * \retval NULL se c'è stato un errore allocando o inizializzando il filesystem (errno settato)
+ * \retval NULL se c'è stato un errore (errno settato)
  * \retval newFilesystem puntatore al filesystem allocato
  */
-Filesystem *initFileSystem(long maxFiles, long maxMemory);
+Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory);
+
+/**
+ * @brief Dealloca il filesystem 'fs'. Si assume che il chiamante abbia la mutua esclusione sul filesystem.
+ * 
+ * @param fs puntatore al filesystem
+ */
 void deleteFileSystem(Filesystem *fs);
+
+/**
+ * @brief Stampa il path e la dimensione di tutti i file presenti nel filesytem. Si assume che il chiamante abbia la mutua esclusione sul filesystem.
+ * 
+ * @param fs puntatore al filesystem
+ */
 void printFileSystem(Filesystem *fs);
 
 /**

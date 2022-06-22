@@ -61,4 +61,4 @@ $(ODIR):
 	mkdir -p $(ODIR)
 
 clean:
-	rm -rf $(ODIR)/ $(BDIR)/ mysock
+	rm -f *~ $(ODIR)/*.o $(BDIR)/*

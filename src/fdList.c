@@ -6,8 +6,15 @@
 #include "../include/utils.h"
 
 fdNode *initNode(int fd)
-{
+{   
     fdNode *newNode;
+
+    if (fd <= 0)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+    
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newNode, errno = ENOMEM; return NULL, 1, sizeof(*newNode));
 
     newNode->fd = fd;
@@ -36,6 +43,9 @@ void deleteList(fdList **list)
 {
     fdNode *tmp;
 
+    if (!(*list))
+        return;
+
     while ((*list)->head)
     {
         tmp = (*list)->head;
@@ -50,6 +60,12 @@ void deleteList(fdList **list)
 
 fdNode *getNode(fdList *list, int key)
 {
+    if (!list || key <= 0)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+
     fdNode *curr = list->head;
 
     while (curr)
@@ -75,6 +91,9 @@ fdNode *getNode(fdList *list, int key)
 
 fdNode *popNode(fdList *list)
 {
+    if (!list)
+        return NULL;
+    
     fdNode *ret = list->head;
 
     if (list->head)
@@ -88,6 +107,12 @@ fdNode *popNode(fdList *list)
 
 int findNode(fdList *list, int key)
 {
+    if (!list || key <= 0)
+    {
+        errno = EINVAL;
+        return 0;
+    }
+
     fdNode *curr = list->head;
 
     while (curr)
@@ -103,7 +128,7 @@ int findNode(fdList *list, int key)
 
 int insertNode(fdList *list, int fd)
 {
-    if (!list || (fd <= 0))
+    if (!list || fd <= 0)
     {
         errno = EINVAL;
         return -1;
