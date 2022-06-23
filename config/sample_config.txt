@@ -16,3 +16,6 @@ SOCKNAME=mysock.sk
 
 # Algoritmo di rimpiazzamento dei file: FIFO = 0, LRU = 1, LFU = 2, SECOND-CHANCE = 3
 REPL_ALG=3
+
+# Path del file di log del server
+LOGS=logs.txt

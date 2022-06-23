@@ -14,9 +14,9 @@ OBJIOUTILS = $(addprefix $(ODIR)/, $(_OBJIOUTILS))
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o compare_func.o
+_OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o logger.o
 OBJSERVERPTHREAD = $(addprefix $(ODIR)/, $(_OBJSERVERPTHREAD))
-_OBJSERVER = configParser.o icl_hash.o fdList.o
+_OBJSERVER = configParser.o icl_hash.o fdList.o compare_func.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
 CC = gcc -g -std=c99 -pedantic

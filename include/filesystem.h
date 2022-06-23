@@ -6,6 +6,9 @@
 
 #include "../include/fdList.h"
 #include "../include/icl_hash.h"
+#include "../include/boundedqueue.h"
+
+#define LOGGER_MSG_QUEUE_LEN 10
 
 typedef struct file
 {
@@ -48,8 +51,24 @@ typedef struct filesystem
 
     int replacement_algo;
 
+    size_t evictedFiles;
+
+    BQueue_t *logger_msg_queue;
+
     pthread_mutex_t fileSystemLock;
 } Filesystem;
+
+/**
+ * @brief Costruisce un messaggio di log con i vari parametri e lo inserisce nella coda dei messaggi per il logger 'logger_msg_queue'
+ *
+ * @param logger_msg_queue coda dei messaggi per il thread logger
+ * @param op nome operazione
+ * @param pathname path del file su cui e' stata eseguita l'operazione
+ * @param clientFd fd del client che ha richiesto l'operazione
+ * @param dataSize bytes scritti/letti
+ * @return 0 se successo, -1 altrimenti e errno settato
+ */
+int logOperation(BQueue_t *logger_msg_queue, const char *op, const char *pathname, const int clientFd, const size_t dataSize);
 
 /**
  * @brief Alloca e inizializza un filesystem con capacita' massima di 'maxFiles' files e una memoria massima di 'maxMemory' Mbytes.
@@ -129,7 +148,7 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
  * \retval numero dei file letti >= 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
-int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize);
+int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize, int clientFd);
 
 /**
  * @brief richiesta di acquisire la lock sul file 'path' del filesystem 'fs' da parte del processo 'clientFd'.

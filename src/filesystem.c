@@ -18,10 +18,56 @@
     file->usedTimes++;              \
     file->referenceBit = 1;
 
+int logOperation(BQueue_t *logger_msg_queue, const char *op, const char *pathname, const int clientFd, const size_t dataSize)
+{
+    char *operation_buf;
+
+    size_t buf_len;
+
+    time_t currTime;
+    struct tm time_info;
+    char timeString[9]; // spazio per HH:MM:SS + '\0'
+
+    time(&currTime);
+
+    memset(&time_info, 0, sizeof time_info);
+
+    localtime_r(&currTime, &time_info);
+    strftime(timeString, sizeof(timeString), "%H:%M:%S", &time_info);
+
+    buf_len = snprintf(NULL, 0, "\ntimestamp: %s\nclientFd: %d\nworkerTid: %ld\noperationType: %s\nfilePath: %s\nbytesProcessed: %zu\n", timeString, clientFd, pthread_self(), op, pathname, dataSize) + 1;
+
+    operation_buf = calloc(buf_len, sizeof(char));
+
+    if (!operation_buf)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    snprintf(operation_buf, buf_len, "\ntimestamp: %s\nclientFd: %d\nworkerTid: %ld\noperationType: %s\nfilePath: %s\nbytesProcessed: %zu\n", timeString, clientFd, pthread_self(), op, pathname, dataSize);
+
+    return push(logger_msg_queue, operation_buf);
+}
+
+/**
+ * @brief Sceglie il file da espellere dal filesystem 'fs' per aggiungere il file 'toAdd'.
+ *  Si assume la mutua esclusione sia sul filesystem sia sul file da aggiungere.
+ *
+ * @param fs puntattore al file system
+ * @param toAdd puntatore al file
+ * @return il file da espellere se successo, NULL altrimenti e errno settato.
+ */
 static File *evictFile(Filesystem *fs, File *toAdd)
 {
     File *toEvict,
         *currFile;
+
+    if (!fs)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
 
     toEvict = fs->file_queue_head != toAdd ? fs->file_queue_head : fs->file_queue_head->next;
 
@@ -31,12 +77,13 @@ static File *evictFile(Filesystem *fs, File *toAdd)
         while (currFile)
         {
             if (currFile != toAdd && (*replace_algo[fs->replacement_algo])(currFile, toEvict) > 0)
-            {
                 toEvict = currFile;
-            }
+
             currFile = currFile->next;
         }
     }
+
+    fs->evictedFiles++;
 
     return toEvict;
 }
@@ -166,15 +213,9 @@ static void freeFile(void *filePtr)
     if (file->data)
         free(file->data);
 
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_mutex_destroy, !=, 0, errnum,
-                         fprintf(stderr, "pthread_mutex_destroy: %s\n", strerror(errnum));
-                         errno = errnum,
-                         &(file->fileLock));
+    CHECK_PTHREAD_AND_ACTION(pthread_mutex_destroy, !=, 0, pthread_exit((void *)EXIT_FAILURE), &(file->fileLock));
 
-    CHECK_RET_AND_ACTION(pthread_cond_destroy, !=, 0, errnum,
-                         fprintf(stderr, "pthread_cond_destroy: %s\n", strerror(errnum));
-                         errno = errnum, &(file->readWrite));
+    CHECK_PTHREAD_AND_ACTION(pthread_cond_destroy, !=, 0, pthread_exit((void *)EXIT_FAILURE), &(file->readWrite));
 
     if (file)
         free(file);
@@ -192,11 +233,13 @@ static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
 {
     LOCK(&(file->fileLock));
 
+    // Attendo che non ci siano scrittori e lettori
     while (file->nReaders > 0 || file->isWritten)
     {
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
+    // Rimuovo il file dall coda del server
     if (file->prev)
         file->prev->next = file->next;
     else
@@ -207,22 +250,29 @@ static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
     else
         fs->file_queue_tail = file->prev;
 
+    // Rimuovo il file dall'hashtable
+    icl_hash_delete(fs->hastTable, file->path, NULL, NULL);
+
+    // Se fornito mi salvo la lista dei client che attendono la lock su questo file
     if (file->waitingForLock && signalForLock)
     {
         *signalForLock = file->waitingForLock->head;
         file->waitingForLock->head = NULL;
     }
 
+    // Elimino la lista dei client che hanno aperto questo file
     if (file->openedBy)
         deleteList(&(file->openedBy));
 
+    // Ora il file non è più accessibile e posso rilasciare tranquillamente la lock
+    UNLOCK(&(file->fileLock));
+
+    // Aggiorno i valori del filesystem
     fs->currFiles--;
     fs->currMemory -= file->dataSize;
 
-    UNLOCK(&(file->fileLock));
-
-    if (icl_hash_delete(fs->hastTable, file->path, NULL, &freeFile) == -1)
-        pthread_exit((void *)EXIT_FAILURE);
+    // Dealloco il file
+    freeFile((void *)file);
 }
 
 static File *getFile(Filesystem *fs, const char *path)
@@ -245,6 +295,7 @@ static int addFile(Filesystem *fs, File *file)
         return -1;
     }
 
+    // Inserisco il file nell'hashtable
     if (!icl_hash_insert(fs->hastTable, file->path, file))
     {
         errno = ENOMEM;
@@ -256,6 +307,7 @@ static int addFile(Filesystem *fs, File *file)
     file->usedTimes = 1;              // Lfu
     file->referenceBit = 1;           // Second-chance
 
+    // Inserisco il file alla fine della coda
     if (!fs->file_queue_head)
     {
         fs->file_queue_head = file;
@@ -298,6 +350,8 @@ Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory, int replacement_al
 
     newFilesystem->replacement_algo = replacement_algo;
 
+    newFilesystem->evictedFiles = 0;
+
     if ((errnum = pthread_mutex_init(&(newFilesystem->fileSystemLock), NULL)) != 0)
     {
         errno = errnum;
@@ -309,6 +363,15 @@ Filesystem *initFileSystem(size_t maxFiles, size_t maxMemory, int replacement_al
     {
         pthread_mutex_destroy(&(newFilesystem->fileSystemLock));
         errno = ENOMEM;
+        return NULL;
+    }
+
+    newFilesystem->logger_msg_queue = initBQueue(LOGGER_MSG_QUEUE_LEN);
+
+    if (!newFilesystem->logger_msg_queue)
+    {
+        pthread_mutex_destroy(&(newFilesystem->fileSystemLock));
+        icl_hash_destroy(newFilesystem->hastTable, NULL, NULL);
         return NULL;
     }
 
@@ -327,9 +390,9 @@ void deleteFileSystem(Filesystem *fs)
 
     icl_hash_destroy(fs->hastTable, NULL, &freeFile);
 
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_mutex_destroy, !=, 0, errnum,
-                         fprintf(stderr, "pthread_mutex_destroy: %s", strerror(errnum)), &(fs->fileSystemLock));
+    CHECK_PTHREAD_AND_ACTION(pthread_mutex_destroy, !=, 0, ;, &(fs->fileSystemLock));
+
+    deleteBQueue(fs->logger_msg_queue, NULL);
 
     free(fs);
 }
@@ -340,7 +403,7 @@ void printFileSystem(Filesystem *fs)
     File *tmpFile;
     int tmpIndex;
     icl_entry_t *tmpEntry;
-    icl_hash_foreach(fs->hastTable, tmpIndex, tmpEntry, tmpFileName, tmpFile, printf("File: %s, dataSize: %ld\n", tmpFileName, tmpFile->dataSize));
+    icl_hash_foreach(fs->hastTable, tmpIndex, tmpEntry, tmpFileName, tmpFile, printf("File: %s\n", tmpFileName));
 }
 
 int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **signalForLock, int clientFd)
@@ -383,6 +446,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **si
         if (fs->currFiles == fs->maxFiles)
         {
             toEvict = evictFile(fs, NULL);
+            logOperation(fs->logger_msg_queue, "evicted", toEvict->path, clientFd, 0);
             deleteFile(fs, toEvict, signalForLock);
         }
 
@@ -420,6 +484,9 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **si
                          UNLOCK(&(file->fileLock));
                          UNLOCK(&(fs->fileSystemLock)); errno = ENOMEM; return -1, file->openedBy, clientFd);
     }
+
+    if (lock)
+        logOperation(fs->logger_msg_queue, "open-lock", path, clientFd, 0);
 
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));
@@ -499,6 +566,8 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     {
         toEvict = evictFile(fs, file);
 
+        logOperation(fs->logger_msg_queue, "evicted", toEvict->path, clientFd, 0);
+
         copyFileToBuffer(toEvict, &toEvict_buf, &toEvict_size);
 
         deleteFile(fs, toEvict, &tmp_signalForLock);
@@ -523,6 +592,8 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     fs->currMemory += file->dataSize;
     fs->absMaxMemory = MAX(fs->absMaxMemory, fs->currMemory);
+
+    logOperation(fs->logger_msg_queue, "writeFile", path, clientFd, dataSize);
 
 cleanup:
     LOCK(&(file->fileLock));
@@ -593,6 +664,8 @@ int readFileHandler(Filesystem *fs, const char *path, void **data_buf, size_t *d
 
     *dataSize = file->dataSize;
 
+    logOperation(fs->logger_msg_queue, "readFile", path, clientFd, file->dataSize);
+
 cleanup:
 
     LOCK(&(file->fileLock))
@@ -609,7 +682,7 @@ cleanup:
     return errno ? -1 : 0;
 }
 
-int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize)
+int readNFilesHandler(Filesystem *fs, const int upperLimit, void **data_buf, size_t *dataSize, int clientFd)
 {
     int readCount;
 
@@ -665,6 +738,7 @@ cleanup:
     *data_buf = file_data_buf;
     *dataSize = bufCurrSize;
 
+    logOperation(fs->logger_msg_queue, "readFile", "readNFiles", clientFd, bufCurrSize);
     return readCount;
 }
 
@@ -706,6 +780,8 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
     }
 
     file->lockedBy = clientFd;
+
+    logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 0);
 
     UPDATE_FILE_REFERENCE(file);
 
@@ -758,6 +834,8 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
 
     *nextLockFd = file->lockedBy = 0;
 
+    logOperation(fs->logger_msg_queue, "unlockFile", path, clientFd, 0);
+
     nextLock = popNode(file->waitingForLock);
 
     if (nextLock)
@@ -793,6 +871,8 @@ int removeFileHandler(Filesystem *fs, const char *path, fdNode **signalForLock, 
         errno = !file ? ENOENT : EACCES;
         return -1;
     }
+
+    logOperation(fs->logger_msg_queue, "removeFile", path, clientFd, 0);
 
     deleteFile(fs, file, signalForLock);
 
@@ -834,6 +914,8 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
     // Rimuovo l'fd del client dalla lista di quelli aperti.
     fdToClose = getNode(file->openedBy, clientFd);
     deleteNode(fdToClose);
+
+    logOperation(fs->logger_msg_queue, "closeFile", path, clientFd, 0);
 
     UPDATE_FILE_REFERENCE(file);
 

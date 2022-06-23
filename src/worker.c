@@ -260,7 +260,7 @@ void *processRequest(void *args)
                 break;
             }
 
-            if (readNFilesHandler(fs, upperLimit, (void **)&file_data_buf, &file_size) == -1)
+            if (readNFilesHandler(fs, upperLimit, (void **)&file_data_buf, &file_size, *client_fd) == -1)
             {
                 SEND_ERROR_CODE(*client_fd);
                 break;

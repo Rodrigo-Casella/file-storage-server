@@ -78,6 +78,17 @@
         action;                                                  \
     }
 
+#define CHECK_PTHREAD_AND_ACTION(func, op, val, action, ...) \
+    if (1)                                                   \
+    {                                                        \
+        int err = 0;                                         \
+        if ((err = func(__VA_ARGS__)) op val)                \
+        {                                                    \
+            fprintf(stderr, #func ": %s\n", strerror(err));  \
+            action;                                          \
+        }                                                    \
+    }
+
 #define SAVE_ERRNO_AND_RETURN(action, retval) \
     if (1)                                    \
     {                                         \
@@ -114,7 +125,7 @@ static inline void getNTokens(char *arg, const char *del, int n, ...)
     token = strtok_r(arg, del, &savePtr);
     for (int i = 0; token && i < n; i++)
     {
-        char **ptr = va_arg(ap, char**);
+        char **ptr = va_arg(ap, char **);
         *ptr = token;
         token = strtok_r(NULL, del, &savePtr);
     }

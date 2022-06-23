@@ -15,11 +15,13 @@
 #include "../include/boundedqueue.h"
 #include "../include/configParser.h"
 #include "../include/filesystem.h"
+#include "../include/logger.h"
 #include "../include/message_protocol.h"
 #include "../include/utils.h"
 #include "../include/worker.h"
 
-#define DFL_SOCKET "./LSOfiletorage.sk"
+#define DFL_SOCKET "LSOfiletorage.sk"
+#define DFL_LOGS "logs.txt"
 #define DFL_THREADS 2
 #define DFL_MAXFILES 10
 #define DFL_MAXMEMORY 100
@@ -39,23 +41,26 @@
         }                                                                           \
     }
 
-#define GET_SETTING_VAL(settings, key, val, default)                                \
-    if (1)                                                                          \
-    {                                                                               \
-        if ((val = getValue(settings, key)) == NULL)                                \
-        {                                                                           \
+#define GET_SETTING_VAL(settings, key, val, default)                               \
+    if (1)                                                                         \
+    {                                                                              \
+        if ((val = getValue(settings, key)) == NULL)                               \
+        {                                                                          \
             fprintf(stderr, "Errore valore " key ", usando valore di default.\n"); \
-            val = strdup(default);                                                  \
-            if (!val)                                                               \
-            {                                                                       \
-                perror("strdup " default);                                          \
-                if (settings)                                                       \
-                    freeSettingList(&settings);                                     \
-                                                                                    \
-                exit(EXIT_FAILURE);                                                 \
-            }                                                                       \
-        }                                                                           \
+            val = strdup(default);                                                 \
+            if (!val)                                                              \
+            {                                                                      \
+                perror("strdup " default);                                         \
+                if (settings)                                                      \
+                    freeSettingList(&settings);                                    \
+                                                                                   \
+                exit(EXIT_FAILURE);                                                \
+            }                                                                      \
+        }                                                                          \
     }
+
+#define FILESYSTEM_STATS(maxFiles, maxMemory, evictedFiles) \
+    printf("Numero massinmo di file: %ld\nDimensione massimma raggiunta: %ld\nNumero di vittime: %ld\n", maxFiles, maxMemory, evictedFiles);
 
 int hardQuit, softQuit;
 
@@ -100,11 +105,14 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    char *sockname;
+    char *sockname,
+        *logs_file;
 
     size_t maxFiles,
         maxMemory,
-        nThreads;
+        nThreads,
+        maxConClients = 0,
+        conClients = 0;
 
     int replacment_algo;
 
@@ -113,6 +121,7 @@ int main(int argc, char const *argv[])
     GET_NUMERIC_SETTING_VAL(settings, "MAXFILES", maxFiles, DFL_MAXFILES, <=, 0);
     GET_NUMERIC_SETTING_VAL(settings, "REPL_ALG", replacment_algo, DFL_REPL_ALG, <, 0 || replacment_algo > 3);
     GET_SETTING_VAL(settings, "SOCKNAME", sockname, DFL_SOCKET);
+    GET_SETTING_VAL(settings, "LOGS", logs_file, DFL_LOGS);
 
     freeSettingList(&settings);
 
@@ -141,7 +150,7 @@ int main(int argc, char const *argv[])
 
     if (!th_args)
         exit(EXIT_FAILURE);
-    
+
     th_args->queue = client_fd_queue;
     th_args->write_end_pipe_fd = workerManagerPipe[1];
     th_args->fs = fs;
@@ -154,9 +163,15 @@ int main(int argc, char const *argv[])
 
     for (int i = 0; i < DFL_THREADS; i++)
     {
-        if (pthread_create(&workers[i], NULL, &processRequest, (void *)th_args) != 0)
-            exit(EXIT_FAILURE);
+        CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &workers[i], NULL, &processRequest, (void *)th_args);
     }
+
+    // Inizializzo e creo il thread che si occupera di scrivere il file di log
+    pthread_t logger;
+    FileLogger logger_args = {.filesystem = fs};
+    strncpy(logger_args.logFilePath, logs_file, PATH_MAX);
+
+    CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &logger, NULL, &writeLogToFile, (void *)&logger_args);
 
     // Imposto l'handler per la gestione dei segnali SIGINT, SIGQUIT e SIGHUP
     struct sigaction act;
@@ -177,9 +192,6 @@ int main(int argc, char const *argv[])
     int listen_fd, fd_max = 0;
 
     fd_set master_set, working_set;
-
-    // Numero di client attualmente connessi
-    int connected_clients = 0;
 
     // Creo la socket del server
     SYSCALL_RET_EQ_ACTION(socket, -1, listen_fd, exit(EXIT_FAILURE), AF_UNIX, SOCK_STREAM, 0);
@@ -207,7 +219,7 @@ int main(int argc, char const *argv[])
             // Se ricevo un interruzione esco dal ciclo subito se: non ci sono client connessi e ho ricevuto SIGHUP, ho ricevuto SIGINT o SIGQUIT
             if (errno == EINTR)
             {
-                if (connected_clients == 0 && softQuit)
+                if (conClients == 0 && softQuit)
                     break;
 
                 continue;
@@ -234,7 +246,9 @@ int main(int argc, char const *argv[])
 
                     FD_SET(fd_client, &master_set);
                     fd_max = MAX(fd_max, fd_client);
-                    ++connected_clients;
+
+                    conClients++;
+                    maxConClients = MAX(maxConClients, conClients);
 
                     continue;
                 }
@@ -245,9 +259,9 @@ int main(int argc, char const *argv[])
 
                     CHECK_AND_ACTION(readn, ==, -1, perror("readn"); exit(EXIT_FAILURE), workerManagerPipe[0], &fd_sent_from_worker, sizeof(int));
 
-                    if (fd_sent_from_worker == 0)
+                    if (fd_sent_from_worker == 0) // un client e' uscito
                     {
-                        if (--connected_clients == 0 && softQuit)
+                        if (--conClients == 0 && softQuit)
                             goto shutdown;
 
                         continue;
@@ -283,11 +297,21 @@ shutdown:
     // E attendo la loro effettiva terminazione
     for (size_t i = 0; i < DFL_THREADS; i++)
     {
-        int err = 0;
-        CHECK_RET_AND_ACTION(pthread_join, !=, 0, err,
-                             fprintf(stderr, "pthread_join: %s\n", strerror(err));
-                             exit(EXIT_FAILURE), workers[i], NULL);
+        CHECK_PTHREAD_AND_ACTION(pthread_join, !=, 0, exit(EXIT_FAILURE), workers[i], NULL);
     }
+
+    logOperation(fs->logger_msg_queue, "absMaxMemory", "", listen_fd, fs->absMaxMemory);
+    logOperation(fs->logger_msg_queue, "absMaxFiles", "", listen_fd, fs->absMaxFiles);
+    logOperation(fs->logger_msg_queue, "MaxClientConnected", "", listen_fd, maxConClients);
+
+    // Mando messaggio di terminazione al thread logger
+    char *stopMsg = calloc(strlen(STOP_MSG) + 1, sizeof(char));
+    strncpy(stopMsg, STOP_MSG, strlen(STOP_MSG) + 1);
+    CHECK_AND_ACTION(push, ==, -1, perror("push"); exit(EXIT_FAILURE), fs->logger_msg_queue, stopMsg);
+
+    // E attendo la sua effettiva terminazione
+    CHECK_PTHREAD_AND_ACTION(pthread_join, !=, 0, exit(EXIT_FAILURE), logger, NULL);
+    free(logs_file);
 
     SYSCALL_EQ_ACTION(unlink, -1, exit(EXIT_FAILURE), sockname);
     free(sockname);
@@ -298,6 +322,8 @@ shutdown:
     free(workers);
     free(th_args);
     deleteBQueue(client_fd_queue, NULL);
+
+    FILESYSTEM_STATS(fs->absMaxFiles, fs->absMaxMemory, fs->evictedFiles);
     // stampo i contenuti del filesystem e lo elimino
     printFileSystem(fs);
     deleteFileSystem(fs);
