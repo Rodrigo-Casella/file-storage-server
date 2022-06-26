@@ -36,7 +36,6 @@
         errno = 0;                                                                  \
         if ((val = getNumericValue(settings, key)) == -1 || val op cond)            \
         {                                                                           \
-            fprintf(stderr, "Errore valore " #key ", usando valore di default.\n"); \
             val = default;                                                          \
         }                                                                           \
     }
@@ -46,7 +45,6 @@
     {                                                                              \
         if ((val = getValue(settings, key)) == NULL)                               \
         {                                                                          \
-            fprintf(stderr, "Errore valore " key ", usando valore di default.\n"); \
             val = strdup(default);                                                 \
             if (!val)                                                              \
             {                                                                      \
@@ -161,7 +159,7 @@ int main(int argc, char const *argv[])
     if (!workers)
         exit(EXIT_FAILURE);
 
-    for (int i = 0; i < DFL_THREADS; i++)
+    for (int i = 0; i < nThreads; i++)
     {
         CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &workers[i], NULL, &processRequest, (void *)th_args);
     }
@@ -291,11 +289,11 @@ shutdown:
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
     // Mando segnale di terminazione ai thread worker
-    for (int i = 0; i < DFL_THREADS; i++)
+    for (int i = 0; i < nThreads; i++)
         push(client_fd_queue, EOS);
 
     // E attendo la loro effettiva terminazione
-    for (size_t i = 0; i < DFL_THREADS; i++)
+    for (size_t i = 0; i < nThreads; i++)
     {
         CHECK_PTHREAD_AND_ACTION(pthread_join, !=, 0, exit(EXIT_FAILURE), workers[i], NULL);
     }

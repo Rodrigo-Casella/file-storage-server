@@ -1,0 +1,12 @@
+# Ignora le righe che iniziano con '#'
+
+# Oppure le righe vuote
+
+# Numero di threads usati dal server
+THREADS=1
+
+# Memoria massima del server in Mbytes
+MAXMEMORY=128
+
+# Numero massimo di files del server
+MAXFILES=10000

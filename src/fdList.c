@@ -6,7 +6,7 @@
 #include "../include/utils.h"
 
 fdNode *initNode(int fd)
-{   
+{
     fdNode *newNode;
 
     if (fd <= 0)
@@ -14,11 +14,11 @@ fdNode *initNode(int fd)
         errno = EINVAL;
         return NULL;
     }
-    
+
     CHECK_RET_AND_ACTION(calloc, ==, NULL, newNode, errno = ENOMEM; return NULL, 1, sizeof(*newNode));
 
     newNode->fd = fd;
-    newNode->next = newNode->prev = NULL;
+    newNode->prev = newNode->next = NULL;
 
     return newNode;
 }
@@ -73,14 +73,14 @@ fdNode *getNode(fdList *list, int key)
         if (curr->fd == key)
         {
             if (!curr->prev)
-            {
                 list->head = curr->next;
-            }
             else
-            {
                 curr->prev->next = curr->next;
+
+            if (!curr->next)
+                list->tail = curr->prev;
+            else
                 curr->next->prev = curr->prev;
-            }
 
             curr->next = curr->prev = NULL;
             return curr;
@@ -93,18 +93,20 @@ fdNode *popNode(fdList *list)
 {
     if (!list)
         return NULL;
-    
-    fdNode *ret = list->head;
 
-    if (list->head)
+    fdNode *node = list->head;
+
+    if (list->head && list->head->next)
+    {
         list->head = list->head->next;
+        list->head->prev = NULL;
+    }
+    else
+    {
+        list->head = list->tail = NULL;
+    }
 
-    if (ret && ret->next)
-        ret->next->prev = ret->prev;
-    if (ret)
-        ret->prev = ret->next = NULL;
-
-    return !ret ? NULL : ret;
+    return node;
 }
 
 int findNode(fdList *list, int key)
@@ -145,27 +147,32 @@ int insertNode(fdList *list, int fd)
     {
         list->head = newNode;
     }
-    else
+
+    if (list->tail)
     {
+        list->tail->next = newNode;
         newNode->prev = list->tail;
-        if (list->tail)
-            list->tail->next = newNode;
     }
 
     list->tail = newNode;
     return 0;
 }
 
-void concanateList(fdNode **dest_head, fdNode *src_head)
+void concanateList(fdList **dest, fdList *src)
 {
-    if (*dest_head == NULL)
+    if (!src)
+        return;
+
+    if (*dest == NULL)
     {
-        *dest_head = src_head;
+        *dest = src;
         return;
     }
 
-    while((*dest_head)->next)
-        dest_head = &((*dest_head)->next);
+    (*dest)->tail->next = src->head;
 
-    (*dest_head)->next = src_head;
+    if (src->head)
+        src->head->prev = (*dest)->tail;
+
+    (*dest)->tail = src->tail;
 }

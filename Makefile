@@ -2,9 +2,10 @@ VPATH = ./src:./include
 SDIR = ./src
 ODIR = ./obj
 BDIR = ./bin
+LIBDIR = ./lib
 
-_SRCCLIENT = client.c cmdLineParser.c
-SRCCLIENT = $(addprefix $(SDIR)/, $(_SRCCLIENT))
+#_SRCCLIENT = client.c cmdLineParser.c
+#SRCCLIENT = $(addprefix $(SDIR)/, $(_SRCCLIENT))
 _OBJCLIENT = client.o cmdLineParser.o
 OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 
@@ -13,6 +14,9 @@ OBJIOUTILS = $(addprefix $(ODIR)/, $(_OBJIOUTILS))
 
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
+
+_LIB = libapi.so
+LIB = $(addprefix $(LIBDIR)/, $(_LIB))
 
 _OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o logger.o
 OBJSERVERPTHREAD = $(addprefix $(ODIR)/, $(_OBJSERVERPTHREAD))
@@ -25,19 +29,19 @@ CFLAGS = -Wall
 APILIB = -lapi
 LDFLAG = -lpthread
 
-.PHONY: all clean
+.PHONY: all clean cleanall test1
 
-all: $(BDIR)/client $(BDIR)/server
+all: client server
 
 
-$(BDIR)/client: $(OBJIOUTILS) $(OBJCLIENT) $(BDIR)/libapi.so | $(BDIR)
-	$(CC) -o $@ $(CFLAGS) $(OBJCLIENT) $(OBJIOUTILS) -Wl,-rpath=$(BDIR) -L$(BDIR) $(APILIB)
+client: $(OBJIOUTILS) $(OBJCLIENT) $(LIB) | $(BDIR)
+	$(CC) -o $(BDIR)/$@ $(CFLAGS) $(OBJCLIENT) $(OBJIOUTILS) -Wl,-rpath=$(LIBDIR) -L$(LIBDIR) $(APILIB)
 
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
 
-$(BDIR)/libapi.so: $(OBJAPI) | $(BDIR)
-	$(CC) -shared -o $@ $(CFLAGS) $^
+$(LIB): $(OBJIOUTILS) $(OBJAPI) | $(LIBDIR)
+	$(CC) -shared -o $@ $(CFLAGS) $(OBJAPI)
 
 $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
@@ -45,8 +49,8 @@ $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 $(OBJIOUTILS): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
 
-$(BDIR)/server: $(OBJSERVER) $(OBJSERVERPTHREAD) | $(BDIR)
-	$(CC) $(PTHREAD) -o $@ $(CFLAGS) $^ $(LDFLAG)
+server: $(OBJSERVER) $(OBJSERVERPTHREAD) | $(BDIR)
+	$(CC) $(PTHREAD) -o $(BDIR)/$@ $(CFLAGS) $^ $(LDFLAG)
 
 $(OBJSERVERPTHREAD): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) $(PTHREAD) -c -o $@ $(CFLAGS) $< $(LDFLAG)
@@ -60,5 +64,16 @@ $(BDIR):
 $(ODIR):
 	mkdir -p $(ODIR)
 
+$(LIBDIR):
+	mkdir -p $(LIBDIR)
+
+test1:	server client
+	./tests/test1.sh
+	./statistiche.sh logs.txt
+
+
 clean:
-	rm -rf $(ODIR)/*.o $(BDIR)/*
+	rm -rf $(ODIR) $(BDIR) $(LIBDIR)
+
+cleanall:
+	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2

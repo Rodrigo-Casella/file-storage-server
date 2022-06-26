@@ -222,7 +222,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWr
             {
                 closedir(dir);
                 free(currPath);
-                return -1;
+                return 0;
             }
 
             (*filesWritten)++;

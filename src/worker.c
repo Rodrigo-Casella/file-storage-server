@@ -49,14 +49,13 @@
         break;                               \
     }
 
-#define SIGNAL_WAITING_FOR_LOCK(signalForLock, responseCode, managerFd)                                                    \
-    while (signalForLock)                                                                                                  \
-    {                                                                                                                      \
-        SEND_RESPONSE_CODE(signalForLock->fd, responseCode);                                                               \
-        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(signalForLock->fd), sizeof(int)); \
-        fdNode *tmp = signalForLock;                                                                                       \
-        signalForLock = signalForLock->next;                                                                               \
-        deleteNode(tmp);                                                                                                   \
+#define SIGNAL_WAITING_FOR_LOCK(signalForLock, responseCode, managerFd)                                          \
+    while (signalForLock && signalForLock->head)                                                                 \
+    {                                                                                                            \
+        fdNode *tmp = popNode(signalForLock);                                                                    \
+        SEND_RESPONSE_CODE(tmp->fd, responseCode);                                                               \
+        CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(tmp->fd), sizeof(int)); \
+        deleteNode(tmp);                                                                                         \
     }
 
 static ssize_t readRequestHeader(int fd, int *request_code, size_t *request_len)
@@ -129,7 +128,7 @@ void *processRequest(void *args)
     BQueue_t *client_request_queue = ((ThreadArgs *)args)->queue;
     Filesystem *fs = ((ThreadArgs *)args)->fs;
     int managerFd = ((ThreadArgs *)args)->write_end_pipe_fd;
-    fdNode *signalForLock = NULL;
+    fdList *signalForLock = NULL;
 
     while (1)
     {
@@ -165,7 +164,7 @@ void *processRequest(void *args)
             SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, SUCCESS, managerFd);
-            // deleteList(&signalForLock);
+            deleteList(&signalForLock);
 
             *client_fd = 0;
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
@@ -239,7 +238,7 @@ void *processRequest(void *args)
                 fprintf(stderr, "Errore inviando mesaggio di terminazione al client\n");
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
-            // deleteList(&signalForLock);
+            deleteList(&signalForLock);
             break;
         case READ_FILE:
             if (readFileHandler(fs, request_payload, (void **)&file_data_buf, &file_size, *client_fd) == -1)
@@ -319,7 +318,7 @@ void *processRequest(void *args)
             SEND_RESPONSE_CODE(*client_fd, SUCCESS);
 
             SIGNAL_WAITING_FOR_LOCK(signalForLock, FILENOENT, managerFd);
-            // deleteList(&signalForLock);
+            deleteList(&signalForLock);
             break;
         case CLOSE_FILE:
             if (closeFileHandler(fs, request_payload, *client_fd) == -1)
@@ -347,6 +346,8 @@ void *processRequest(void *args)
             free(client_fd);
         }
     }
+
+    deleteList(&signalForLock);
 
     pthread_exit(NULL);
 }

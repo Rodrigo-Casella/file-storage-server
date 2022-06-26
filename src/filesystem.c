@@ -137,6 +137,7 @@ static int copyFileToBuffer(File *file, char **buf, size_t *bufCurrSize)
 
     return 0;
 }
+
 /**
  * @brief Alloca e inizializza un file con pathname @param path pathname del file.
  *
@@ -229,7 +230,7 @@ static void freeFile(void *filePtr)
  * @param file file da rimuovere
  * @param signalForLock puntatore alla lista di client che attendono la lock sul file
  */
-static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
+static void deleteFile(Filesystem *fs, File *file, fdList **signalForLock)
 {
     LOCK(&(file->fileLock));
 
@@ -240,15 +241,15 @@ static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
     }
 
     // Rimuovo il file dall coda del server
-    if (file->prev)
-        file->prev->next = file->next;
-    else
+    if (!file->prev)
         fs->file_queue_head = file->next;
-
-    if (file->next)
-        file->next->prev = file->prev;
     else
+        file->prev->next = file->next;
+
+    if (!file->next)
         fs->file_queue_tail = file->prev;
+    else
+        file->next->prev = file->prev;
 
     // Rimuovo il file dall'hashtable
     icl_hash_delete(fs->hastTable, file->path, NULL, NULL);
@@ -256,8 +257,8 @@ static void deleteFile(Filesystem *fs, File *file, fdNode **signalForLock)
     // Se fornito mi salvo la lista dei client che attendono la lock su questo file
     if (file->waitingForLock && signalForLock)
     {
-        *signalForLock = file->waitingForLock->head;
-        file->waitingForLock->head = NULL;
+        *signalForLock = file->waitingForLock;
+        file->waitingForLock = NULL;
     }
 
     // Elimino la lista dei client che hanno aperto questo file
@@ -406,7 +407,7 @@ void printFileSystem(Filesystem *fs)
     icl_hash_foreach(fs->hastTable, tmpIndex, tmpEntry, tmpFileName, tmpFile, printf("File: %s\n", tmpFileName));
 }
 
-int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **signalForLock, int clientFd)
+int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **signalForLock, int clientFd)
 {
     File *file,
         *toEvict;
@@ -494,7 +495,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **si
     return 0;
 }
 
-int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, void **evicted_files, size_t *evicted_files_size, fdNode **signalForLock, int clientFd)
+int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, void **evicted_files, size_t *evicted_files_size, fdList **signalForLock, int clientFd)
 {
     File *file,
         *toEvict;
@@ -504,7 +505,7 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     size_t toEvict_size = 0;
 
-    fdNode *tmp_signalForLock;
+    fdList *tmp_signalForLock;
 
     if (!fs || !path || !data || dataSize <= 0 || clientFd <= 0)
     {
@@ -532,6 +533,15 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         UNLOCK(&(file->fileLock));
         UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
+        
+    }
+
+    // I dati da scrivere sono troppi per lo storage
+    if ((file->dataSize + dataSize) > fs->maxMemory)
+    {
+        UNLOCK(&(file->fileLock));
+        UNLOCK(&(fs->fileSystemLock));
+        errno = EFBIG;
         return -1;
     }
 
@@ -546,13 +556,6 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
     UPDATE_FILE_REFERENCE(file);
 
     UNLOCK(&(file->fileLock));
-
-    // I dati da scrivere sono troppi per lo storage
-    if ((file->dataSize + dataSize) > fs->maxMemory)
-    {
-        errno = EFBIG;
-        goto cleanup;
-    }
 
     fileData = calloc((file->dataSize + dataSize), sizeof(*fileData));
 
@@ -572,7 +575,7 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
         deleteFile(fs, toEvict, &tmp_signalForLock);
 
-        concanateList(&((*signalForLock)), tmp_signalForLock);
+        concanateList(signalForLock, tmp_signalForLock);
     }
 
     *evicted_files = toEvict_buf;
@@ -670,12 +673,13 @@ cleanup:
 
     LOCK(&(file->fileLock))
 
+    file->nReaders--;
+
+    // Segnalo che non ci sono più lettori
     if (!file->nReaders)
     {
         SIGNAL(&(file->readWrite));
     }
-
-    file->nReaders--;
 
     UNLOCK(&(file->fileLock));
 
@@ -774,20 +778,18 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
 
     if (file->lockedBy && file->lockedBy != clientFd)
     {
-        CHECK_AND_ACTION(insertNode, ==, -1, perror("insertNode"); pthread_exit((void *)EXIT_FAILURE), file->waitingForLock, clientFd);
+        CHECK_AND_ACTION(insertNode, ==, -1, return -1, file->waitingForLock, clientFd);
         UNLOCK(&(fs->fileSystemLock));
         return -2;
     }
 
     file->lockedBy = clientFd;
 
-    logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 0);
-
     UPDATE_FILE_REFERENCE(file);
 
-    BCAST(&(file->readWrite));
-
     UNLOCK(&(file->fileLock));
+
+    logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 0);
 
     return 0;
 }
@@ -841,16 +843,16 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
     if (nextLock)
         *nextLockFd = file->lockedBy = nextLock->fd;
 
-    UPDATE_FILE_REFERENCE(file);
+    deleteNode(nextLock);
 
-    BCAST(&(file->readWrite));
+    UPDATE_FILE_REFERENCE(file);
 
     UNLOCK(&(file->fileLock));
 
     return 0;
 }
 
-int removeFileHandler(Filesystem *fs, const char *path, fdNode **signalForLock, int clientFd)
+int removeFileHandler(Filesystem *fs, const char *path, fdList **signalForLock, int clientFd)
 {
     File *file;
 
@@ -919,15 +921,13 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
 
     UPDATE_FILE_REFERENCE(file);
 
-    BCAST(&(file->readWrite));
-
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));
 
     return 0;
 }
 
-int clientExitHandler(Filesystem *fs, fdNode **signalForLock, int clientFd)
+int clientExitHandler(Filesystem *fs, fdList **signalForLock, int clientFd)
 {
     File *currFile;
 
@@ -974,11 +974,12 @@ int clientExitHandler(Filesystem *fs, fdNode **signalForLock, int clientFd)
 
             if (nextNode)
             {
-                nextNode->next = *signalForLock;
-                (*signalForLock)->prev = nextNode;
-                (*signalForLock) = nextNode;
+                insertNode(*signalForLock, nextNode->fd);
+
                 currFile->lockedBy = nextNode->fd;
             }
+
+            deleteNode(nextNode);
         }
 
         tmp = getNode(currFile->waitingForLock, clientFd);

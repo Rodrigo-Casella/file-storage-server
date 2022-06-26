@@ -146,15 +146,8 @@ static inline void freeNargs(int n, ...)
 
 static inline void setTimespecMsec(struct timespec *time, long msec)
 {
-    int sec = msec / 1000;
-    long nanosec = ((msec % 1000) * 1000000);
-    if (nanosec > 999999999)
-    {
-        fprintf(stderr, "Tempo intervallo tra richieste in nanosecondi fuori range.\n");
-        sec = 0, nanosec = 0;
-    }
-    (*time).tv_sec = sec;
-    (*time).tv_nsec = nanosec;
+    time->tv_sec = msec / 1000;
+    time->tv_nsec = (msec % 1000) * 1000000;
 }
 
 static inline int isNumber(const char *s, long *n)

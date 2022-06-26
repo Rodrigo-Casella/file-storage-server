@@ -106,7 +106,7 @@ void printFileSystem(Filesystem *fs);
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
-int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **signalForLock, int clientFd);
+int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **signalForLock, int clientFd);
 
 /**
  * @brief Scrive un file nel filesystem. (Le scritture avvengono solo in append)
@@ -120,7 +120,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdNode **si
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
-int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, void **evicted_files, size_t *evicted_files_size, fdNode **signalForLock, int clientFd);
+int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSize, void **evicted_files, size_t *evicted_files_size, fdList **signalForLock, int clientFd);
 
 /**
  * @brief Legge un file dal filesystem
@@ -186,7 +186,7 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
-int removeFileHandler(Filesystem *fs, const char *path, fdNode **signalForLock, int clientFd);
+int removeFileHandler(Filesystem *fs, const char *path, fdList **signalForLock, int clientFd);
 
 /**
  * @brief richiesta di chiudere il file 'path' dal filesystem 'fs' da parte del processo 'clientFd'.
@@ -209,7 +209,7 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd);
  * \retval 0 se successo
  * \retval -1 se errore (errno settato opportunatamente)
  */
-int clientExitHandler(Filesystem *fs, fdNode **signalForLock, int clientFd);
+int clientExitHandler(Filesystem *fs, fdList **signalForLock, int clientFd);
 
 /**
  * @brief Verifica che il client che ha richiesto una writeFile abbia precedentemente effettuato una openFile con i flag O_CREATE O_LOCK
