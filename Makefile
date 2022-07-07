@@ -1,11 +1,10 @@
+SHELL := /bin/bash
 VPATH = ./src:./include
 SDIR = ./src
 ODIR = ./obj
 BDIR = ./bin
 LIBDIR = ./lib
 
-#_SRCCLIENT = client.c cmdLineParser.c
-#SRCCLIENT = $(addprefix $(SDIR)/, $(_SRCCLIENT))
 _OBJCLIENT = client.o cmdLineParser.o
 OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 
@@ -20,6 +19,7 @@ LIB = $(addprefix $(LIBDIR)/, $(_LIB))
 
 _OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o logger.o
 OBJSERVERPTHREAD = $(addprefix $(ODIR)/, $(_OBJSERVERPTHREAD))
+
 _OBJSERVER = configParser.o icl_hash.o fdList.o compare_func.o
 OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 
@@ -29,7 +29,7 @@ CFLAGS = -Wall
 APILIB = -lapi
 LDFLAG = -lpthread
 
-.PHONY: all clean cleanall test1
+.PHONY: all clean cleanall cleantest1 test1
 
 all: client server
 
@@ -77,3 +77,6 @@ clean:
 
 cleanall:
 	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2
+
+cleantest1:
+	rm -rf logs.txt tests/test1tmp1 tests/test1tmp2

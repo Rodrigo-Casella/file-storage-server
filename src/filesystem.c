@@ -779,7 +779,8 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
     if (file->lockedBy && file->lockedBy != clientFd)
     {
         CHECK_AND_ACTION(insertNode, ==, -1, return -1, file->waitingForLock, clientFd);
-        UNLOCK(&(fs->fileSystemLock));
+        UNLOCK(&(file->fileLock));
+        logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 1);
         return -2;
     }
 
@@ -829,7 +830,6 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
     if (file->lockedBy != clientFd)
     {
         UNLOCK(&(file->fileLock));
-        UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
         return -1;
     }
@@ -974,6 +974,9 @@ int clientExitHandler(Filesystem *fs, fdList **signalForLock, int clientFd)
 
             if (nextNode)
             {
+                if (!(*signalForLock))
+                    *signalForLock = initList();
+                
                 insertNode(*signalForLock, nextNode->fd);
 
                 currFile->lockedBy = nextNode->fd;

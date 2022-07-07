@@ -163,41 +163,40 @@ char *readFileFromPath(const char *path, size_t *file_len)
 {
     char *file_data;
 
-    int file_fd;
+    FILE *fp;
 
-    if (!path || strlen(path) <= 0)
-    {
-        errno = EINVAL;
-        return NULL;
-    }
-
-    if ((file_fd = open(path, O_RDONLY)) == -1)
+    if ((fp = fopen(path, "r")) == NULL)
         return NULL;
 
-    if ((*file_len = lseek(file_fd, 0L, SEEK_END)) == -1)
+    if (fseek(fp, 0, SEEK_END) == -1)
     {
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
+        SAVE_ERRNO_AND_RETURN(fclose(fp), NULL);
+    }
+        
+    if ((*file_len = ftell(fp)) < 0)
+    {
+        SAVE_ERRNO_AND_RETURN(fclose(fp), NULL);
     }
 
-    if (lseek(file_fd, 0L, SEEK_SET) == -1)
-    {
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
-    }
+    rewind(fp);
 
     file_data = calloc((*file_len), sizeof(char));
 
     if (!file_data)
     {
         errno = ENOMEM;
-        SAVE_ERRNO_AND_RETURN(close(file_fd), NULL);
+        SAVE_ERRNO_AND_RETURN(fclose(fp), NULL);
     }
 
-    if (readn(file_fd, file_data, *file_len) == -1)
+    if (fread(file_data, sizeof(char), *file_len, fp) <= 0)
     {
-        SAVE_ERRNO_AND_RETURN(close(file_fd); free(file_data), NULL);
+        if (ferror(fp))
+        {
+            SAVE_ERRNO_AND_RETURN(fclose(fp); free(file_data), NULL);
+        }
     }
 
-    if (close(file_fd) == -1)
+    if (fclose(fp) == -1)
         free(file_data);
 
     return errno ? NULL : file_data;
