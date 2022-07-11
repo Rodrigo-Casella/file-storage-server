@@ -3,19 +3,13 @@
 # Oppure le righe vuote
 
 # Numero di threads usati dal server
-THREADS=2
+THREADS=4
 
 # Memoria massima del server in Mbytes
-MAXMEMORY=60
+MAXMEMORY=1
 
 # Numero massimo di files del server
 MAXFILES=10
 
-# Nome della socket
-SOCKNAME=mysock.sk
-
 # Algoritmo di rimpiazzamento dei file: FIFO = 0, LRU = 1, LFU = 2, SECOND-CHANCE = 3
-REPL_ALG=0
-
-# Path del file di log del server
-LOGS=logs.txt
+REPL_ALG=3

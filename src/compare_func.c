@@ -19,14 +19,11 @@ int lfu(File *file1, File *file2)
 
 int second_chance(File *file1, File *file2)
 {
-    if (file2->insertionTime - file1->insertionTime > 0)
+    if (file1->referenceBit)
     {
-        if (file1->referenceBit)
-        {
-            file1->referenceBit = 0;
-            file1->insertionTime = time(NULL);
-            return 0;
-        }
+        file1->referenceBit = 0;
+        file1->insertionTime = time(NULL);
+        return 0;
     }
 
     return 1;

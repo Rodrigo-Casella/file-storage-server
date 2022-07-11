@@ -58,7 +58,7 @@
     }
 
 #define FILESYSTEM_STATS(maxFiles, maxMemory, evictedFiles) \
-    printf("Numero massinmo di file: %ld\nDimensione massimma raggiunta: %ld\nNumero di vittime: %ld\n", maxFiles, maxMemory, evictedFiles);
+    printf("Numero massimo di file: %ld\nDimensione massimma raggiunta: %ld\nNumero di vittime: %ld\n", maxFiles, maxMemory, evictedFiles);
 
 int hardQuit, softQuit;
 

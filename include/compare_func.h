@@ -6,7 +6,7 @@
 #define FIFO 0
 #define LRU 1
 #define LFU 2
-#define SEC 3
+#define SECOND_CHANCE 3
 
 int fifo(File *file1, File *file2);
 

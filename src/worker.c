@@ -307,7 +307,6 @@ void *processRequest(void *args)
             {
                 SEND_RESPONSE_CODE(nextLockFd, SUCCESS);
                 CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &nextLockFd, sizeof(int));
-                logOperation(fs->logger_msg_queue, "WriteFdToManager", "", *client_fd, 0);
             }
             break;
         case REMOVE_FILE:
@@ -343,7 +342,6 @@ void *processRequest(void *args)
         if (!waitForLock)
         {
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
-            logOperation(fs->logger_msg_queue, "WriteFdToManager", "", *client_fd, 0);
         }
 
         free(client_fd);

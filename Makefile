@@ -29,7 +29,7 @@ CFLAGS = -Wall
 APILIB = -lapi
 LDFLAG = -lpthread
 
-.PHONY: all clean cleanall cleantest1 test1
+.PHONY: all clean cleanall test1 test2
 
 all: client server
 
@@ -71,12 +71,11 @@ test1:	server client
 	./tests/test1.sh
 	./statistiche.sh logs.txt
 
+test2:	server client
+	./tests/test2.sh
 
 clean:
 	rm -rf $(ODIR) $(BDIR) $(LIBDIR)
 
 cleanall:
-	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2
-
-cleantest1:
-	rm -rf logs.txt tests/test1tmp1 tests/test1tmp2
+	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2 tests/evicted1 tests/evicted2 tests/evicted3 tests/evicted4

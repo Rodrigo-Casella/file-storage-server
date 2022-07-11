@@ -51,6 +51,50 @@ int logOperation(BQueue_t *logger_msg_queue, const char *op, const char *pathnam
 }
 
 /**
+ * @brief Aggiunge alla coda del filesystem 'fs' un file
+ *
+ * @param fs puntatore al filesystem
+ * @param file file da aggiungere
+ */
+static void addFileToQueue(Filesystem *fs, File *file)
+{
+    if (!fs->file_queue_head)
+    {
+        fs->file_queue_head = file;
+    }
+    else
+    {
+        file->prev = fs->file_queue_tail;
+        fs->file_queue_tail->next = file;
+    }
+
+    fs->file_queue_tail = file;
+}
+
+/**
+ * @brief Rimuove dalla coda del filesystem 'fs' un file
+ *
+ * @param fs puntatore al filesystem
+ * @param file file da aggiungere
+ */
+static void removeFileFromQueue(Filesystem *fs, File *file)
+{
+    // il file è il primo della coda
+    if (!file->prev)
+        fs->file_queue_head = file->next;
+    else
+        file->prev->next = file->next;
+
+    // il file è l'ultimo della coda
+    if (!file->next)
+        fs->file_queue_tail = file->prev;
+    else
+        file->next->prev = file->prev;
+
+    file->prev = file->next = NULL;
+}
+
+/**
  * @brief Sceglie il file da espellere dal filesystem 'fs' per aggiungere il file 'toAdd'.
  *  Si assume la mutua esclusione sia sul filesystem sia sul file da aggiungere.
  *
@@ -61,7 +105,10 @@ int logOperation(BQueue_t *logger_msg_queue, const char *op, const char *pathnam
 static File *evictFile(Filesystem *fs, File *toAdd)
 {
     File *toEvict,
-        *currFile;
+        *currFile,
+        *tmp;
+
+    int res;
 
     if (!fs)
     {
@@ -76,10 +123,25 @@ static File *evictFile(Filesystem *fs, File *toAdd)
         currFile = fs->file_queue_head;
         while (currFile)
         {
-            if (currFile != toAdd && (*replace_algo[fs->replacement_algo])(currFile, toEvict) > 0)
+            if (currFile != toAdd && (res = (*replace_algo[fs->replacement_algo])(currFile, toEvict)) > 0)
                 toEvict = currFile;
 
+            tmp = currFile;
             currFile = currFile->next;
+
+            if (fs->replacement_algo == SECOND_CHANCE)
+            {
+                // Ho troavto un file con il referenceBit settato a 0
+                if (res == 1)
+                    break;
+
+                if (tmp == toAdd)
+                    continue;
+
+                // Sposto il file alla fine della coda
+                removeFileFromQueue(fs, tmp);
+                addFileToQueue(fs, tmp);
+            }
         }
     }
 
@@ -241,15 +303,7 @@ static void deleteFile(Filesystem *fs, File *file, fdList **signalForLock)
     }
 
     // Rimuovo il file dall coda del server
-    if (!file->prev)
-        fs->file_queue_head = file->next;
-    else
-        file->prev->next = file->next;
-
-    if (!file->next)
-        fs->file_queue_tail = file->prev;
-    else
-        file->next->prev = file->prev;
+    removeFileFromQueue(fs, file);
 
     // Rimuovo il file dall'hashtable
     icl_hash_delete(fs->hastTable, file->path, NULL, NULL);
@@ -309,18 +363,7 @@ static int addFile(Filesystem *fs, File *file)
     file->referenceBit = 1;           // Second-chance
 
     // Inserisco il file alla fine della coda
-    if (!fs->file_queue_head)
-    {
-        fs->file_queue_head = file;
-    }
-    else
-    {
-        file->prev = fs->file_queue_tail;
-        if (fs->file_queue_tail)
-            fs->file_queue_tail->next = file;
-    }
-
-    fs->file_queue_tail = file;
+    addFileToQueue(fs, file);
 
     fs->currFiles++;
     fs->absMaxFiles = MAX(fs->absMaxFiles, fs->currFiles);
@@ -533,7 +576,6 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         UNLOCK(&(file->fileLock));
         UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
-        
     }
 
     // I dati da scrivere sono troppi per lo storage
@@ -776,6 +818,8 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
+    UPDATE_FILE_REFERENCE(file);
+
     if (file->lockedBy && file->lockedBy != clientFd)
     {
         CHECK_AND_ACTION(insertNode, ==, -1, return -1, file->waitingForLock, clientFd);
@@ -786,7 +830,7 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
 
     file->lockedBy = clientFd;
 
-    UPDATE_FILE_REFERENCE(file);
+    BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
 
@@ -826,6 +870,8 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
+    UPDATE_FILE_REFERENCE(file);
+
     // il file è in stato di lock da parte di un altro processo
     if (file->lockedBy != clientFd)
     {
@@ -845,7 +891,7 @@ int unlockFileHandler(Filesystem *fs, const char *path, int *nextLockFd, int cli
 
     deleteNode(nextLock);
 
-    UPDATE_FILE_REFERENCE(file);
+    BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
 
@@ -913,13 +959,15 @@ int closeFileHandler(Filesystem *fs, const char *path, int clientFd)
         WAIT(&(file->readWrite), &(file->fileLock));
     }
 
+    UPDATE_FILE_REFERENCE(file);
+
     // Rimuovo l'fd del client dalla lista di quelli aperti.
     fdToClose = getNode(file->openedBy, clientFd);
     deleteNode(fdToClose);
 
     logOperation(fs->logger_msg_queue, "closeFile", path, clientFd, 0);
 
-    UPDATE_FILE_REFERENCE(file);
+    BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
     UNLOCK(&(fs->fileSystemLock));
@@ -976,7 +1024,7 @@ int clientExitHandler(Filesystem *fs, fdList **signalForLock, int clientFd)
             {
                 if (!(*signalForLock))
                     *signalForLock = initList();
-                
+
                 insertNode(*signalForLock, nextNode->fd);
 
                 currFile->lockedBy = nextNode->fd;
