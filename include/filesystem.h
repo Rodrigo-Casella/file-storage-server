@@ -8,7 +8,7 @@
 #include "../include/icl_hash.h"
 #include "../include/boundedqueue.h"
 
-#define LOGGER_MSG_QUEUE_LEN 10
+#define LOGGER_MSG_QUEUE_LEN 20
 
 typedef struct file
 {

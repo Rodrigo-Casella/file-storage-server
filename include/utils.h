@@ -84,7 +84,7 @@
         int err = 0;                                         \
         if ((err = func(__VA_ARGS__)) op val)                \
         {                                                    \
-            fprintf(stderr, #func ": %s\n", strerror(err));  \
+            errno = err;                                     \
             action;                                          \
         }                                                    \
     }

@@ -32,18 +32,18 @@ const char *responseMsg[] = {
 #define PRINT_OP(op, file, outcome) \
     printf("%s: %s %s", #op, file, responseMsg[outcome - 1]);
 
-#define SERVER_RESPONSE(op, file)                                \
-    if (1)                                                       \
-    {                                                            \
-        int response_code;                                       \
-        if (read(fd_skt, &response_code, sizeof(int)) == -1)     \
-            PRINT_OP(op, file, INVALID_RES);                     \
-        if (response_code < SUCCESS || response_code > BIG_FILE) \
-            response_code = INVALID_RES;                         \
-        if (toPrint)                                             \
-            PRINT_OP(op, file, response_code);                   \
-                                                                 \
-        errno = response_code != SUCCESS ? EBADE : 0;            \
+#define SERVER_RESPONSE(op, file)                                        \
+    if (1)                                                               \
+    {                                                                    \
+        int response_code;                                               \
+        if (readn(fd_skt, &response_code, sizeof(int)) == -1 && toPrint) \
+            PRINT_OP(op, file, INVALID_RES);                             \
+        if (response_code < SUCCESS || response_code > BIG_FILE)         \
+            response_code = INVALID_RES;                                 \
+        if (toPrint)                                                     \
+            PRINT_OP(op, file, response_code);                           \
+                                                                         \
+        errno = response_code != SUCCESS ? EBADE : 0;                    \
     }
 
 int toPrint = 0;
@@ -52,7 +52,7 @@ char server_addr_path[UNIX_PATH_MAX];
 
 static int buildRequest(struct iovec request[], size_t request_len, int *op, size_t *request_msg_len, char *request_msg)
 {
-    if (request_len < 3 || (*op < OPEN_FILE || *op > CLOSE_FILE) || !request_msg || *request_msg_len <= 0)
+    if (request_len < 3 || (*op < CLOSE_CONNECTION || *op > CLOSE_FILE) || !request_msg || *request_msg_len <= 0)
     {
         errno = EINVAL;
         return -1;
@@ -115,18 +115,41 @@ int openConnection(const char *sockname, int msec, const struct timespec abstime
 
 int closeConnection(const char *sockname)
 {
+    int op = CLOSE_CONNECTION;
+
+    char *sockname_buf;
+
+    size_t sockname_buf_len;
+
+    struct iovec request[3];
+
     if (!sockname || strncmp(sockname, server_addr_path, UNIX_PATH_MAX) != 0)
     {
         errno = EINVAL;
         return -1;
     }
 
+    sockname_buf_len = strlen(sockname);
+
+    sockname_buf = strdup(sockname);
+    sockname_buf[sockname_buf_len++] = '\0';
+
+    if (!sockname_buf)
+        return -1;
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &sockname_buf_len, sockname_buf) == -1)
+        return -1;
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+        return -1;
+
+    free(sockname_buf);
+
+    SERVER_RESPONSE(closeConnection, sockname);
+
     SYSCALL_EQ_ACTION(close, -1, return -1, fd_skt);
 
-    if (toPrint)
-        puts("Disconesso dal server");
-
-    return 0;
+    return errno ? -1 : 0;
 }
 
 int openFile(const char *pathname, int flags)

@@ -51,6 +51,10 @@
     printf(HELP_MSG, argv[0]);                \
     FREE_AND_EXIT(list, option, EXIT_SUCCESS);
 
+#define PRINT(msg) \
+    if (toPrint)   \
+        msg;
+
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
 
 #define CALL_API_ON_TOKEN(api, arg)                 \
@@ -62,7 +66,7 @@
         while (token)                               \
         {                                           \
             if (api(token) == -1)                   \
-                perror(#api);                       \
+                PRINT(perror(#api));                \
             token = strtok_r(NULL, ",", &savePtr);  \
         }                                           \
     }
@@ -74,11 +78,11 @@
         saveDir = nextOption->arg;                  \
     }
 
-#define CHECK_IS_NUMBER(num_string, num)                                                                     \
-    if (num_string && ((isNumber(num_string, &num) != 0)))                                                   \
-    {                                                                                                        \
-        fprintf(stderr, "Errore: %s, non e' un numero valido. Impostando valore di default.\n", num_string); \
-        num = 0;                                                                                             \
+#define CHECK_IS_NUMBER(num_string, num)                                                                            \
+    if (num_string && ((isNumber(num_string, &num) != 0)))                                                          \
+    {                                                                                                               \
+        PRINT(fprintf(stderr, "Errore: %s, non e' un numero valido. Impostando valore di default.\n", num_string)); \
+        num = 0;                                                                                                    \
     }
 
 char *realpath(const char *path, char *resolved_path);
@@ -104,19 +108,19 @@ int writeFileHandler(const char *file_path, const char *save_dir)
 
     if (openFile(resolved_path, O_CREATE | O_LOCK) == -1)
     {
-        perror("openFile");
+        PRINT(perror("openFile"));
         return -1;
     }
 
     if (writeFile(resolved_path, save_dir) == -1)
     {
-        perror("writeFile");
+        PRINT(perror("writeFile"));
         return -1;
     }
 
     if (closeFile(resolved_path) == -1)
     {
-        perror("closeFile");
+        PRINT(perror("closeFile"));
         return -1;
     }
     return 0;
@@ -147,13 +151,13 @@ int readFileHandler(const char *file_path, const char *save_dir)
 
     if (openFile(resolved_path, 0) == -1)
     {
-        perror("openFile");
+        PRINT(perror("openFile"))
         return -1;
     }
 
     if (readFile(resolved_path, (void **)&buf, &size) == -1)
     {
-        perror("readFile");
+        PRINT(perror("readFile"));
         return -1;
     }
 
@@ -163,14 +167,14 @@ int readFileHandler(const char *file_path, const char *save_dir)
             printf("Salvando file su %s\n", save_dir);
 
         if (writeFileToDir(save_dir, file_path, buf, size) == -1)
-            perror("writeFileToDir");
+            PRINT(perror("writeFileToDir"));
     }
 
     free(buf);
 
     if (closeFile(resolved_path) == -1)
     {
-        perror("closeFile");
+        PRINT(perror("closeFile"));
         return -1;
     }
 
@@ -205,7 +209,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWr
         strcat(currPath, entry->d_name);
 
         if (stat(currPath, &info) == -1)
-            perror("stat");
+            PRINT(perror("stat"));
 
         if (S_ISDIR(info.st_mode))
         {
@@ -291,7 +295,7 @@ int main(int argc, char *argv[])
 
     CHECK_RET_AND_ACTION(getOption, ==, NULL, selectedOption, fprintf(stderr, "Errore, opzione -f necessaria.\n"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), list, 'f');
 
-    CHECK_RET_AND_ACTION(strdup, ==, NULL, sockname, perror("strdup"); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption->arg);
+    CHECK_RET_AND_ACTION(strdup, ==, NULL, sockname, PRINT(perror("strdup")); FREE_AND_EXIT(list, selectedOption, EXIT_FAILURE), selectedOption->arg);
 
     freeOption(selectedOption);
 
@@ -317,7 +321,7 @@ int main(int argc, char *argv[])
     int msec = RETRY_TIME_MSEC;
     struct timespec abstime = {.tv_sec = time(NULL) + MAX_RETRY_TIME_SEC, .tv_nsec = 0};
 
-    CHECK_AND_ACTION(openConnection, ==, -1, perror("openConnection"); free(sockname); FREE_AND_EXIT(list, NULL, EXIT_FAILURE), sockname, msec, abstime);
+    CHECK_AND_ACTION(openConnection, ==, -1, PRINT(perror("openConnection")); free(sockname); FREE_AND_EXIT(list, NULL, EXIT_FAILURE), sockname, msec, abstime);
 
     selectedOption = list->head;
     int skipOption = 0;
@@ -334,7 +338,7 @@ int main(int argc, char *argv[])
         {
         case 'w':;
             char *filesToWrite_string = NULL,
-                *dirToWrite = NULL;
+                 *dirToWrite = NULL;
 
             long filesToWrite = 0;
 
@@ -347,22 +351,22 @@ int main(int argc, char *argv[])
             CHECK_IS_NUMBER(filesToWrite_string, filesToWrite);
 
             if (writeDirHandler(dirToWrite, saveDir, filesToWrite, &filesWritten) || filesWritten <= 0)
-                fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite);
+                PRINT(fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite));
             break;
         case 'W':;
             CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
 
             if (callReadWriteOnList(selectedOption->arg, saveDir, ",", writeFileHandler) == -1)
-                perror("callReadWriteOnList");
+                PRINT(perror("callReadWriteOnList"));
             break;
         case 'D':
-            fprintf(stderr, "Errore, l'opzione -D va usata congiuntamente a -w o -W.\n");
+            PRINT(fprintf(stderr, "Errore, l'opzione -D va usata congiuntamente a -w o -W.\n"));
             break;
         case 'r':;
             CHECK_SAVE_DIR(selectedOption->next, 'd', saveDir);
 
             if (callReadWriteOnList(selectedOption->arg, saveDir, ",", readFileHandler) == -1)
-                perror("callReadWriteOnList");
+                PRINT(perror("callReadWriteOnList"));
             break;
         case 'R':;
             long files_to_read = 0;
@@ -371,10 +375,10 @@ int main(int argc, char *argv[])
             CHECK_IS_NUMBER(selectedOption->arg, files_to_read);
 
             if (readNFiles(files_to_read, saveDir) == -1)
-                perror("readNFiles");
+                PRINT(perror("readNFiles"));
             break;
         case 'd':
-            fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n");
+            PRINT(fprintf(stderr, "Errore, l'opzione -d va usata congiuntamente a -r o -R.\n"));
             break;
         case 'l':
             CALL_API_ON_TOKEN(lockFile, selectedOption->arg);
@@ -386,7 +390,8 @@ int main(int argc, char *argv[])
             CALL_API_ON_TOKEN(removeFile, selectedOption->arg);
             break;
         default:
-            fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
+            if (toPrint)
+                fprintf(stderr, "Errore opzione -%c gia' impostata.\n", selectedOption->opt); // opizioni -f -p o -t duplicate
             break;
         }
 
@@ -398,7 +403,7 @@ int main(int argc, char *argv[])
             selectedOption = selectedOption->next;
     }
 
-    CHECK_AND_ACTION(closeConnection, ==, -1, perror("closeConnection"), sockname);
+    CHECK_AND_ACTION(closeConnection, ==, -1, PRINT(perror("closeConnection")), sockname);
     free(sockname);
     freeOptionList(list);
     return 0;

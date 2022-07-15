@@ -85,6 +85,7 @@ fdNode *getNode(fdList *list, int key)
             curr->next = curr->prev = NULL;
             return curr;
         }
+        curr = curr->next;
     }
     return NULL;
 }
@@ -160,7 +161,7 @@ int insertNode(fdList *list, int fd)
 
 void concanateList(fdList **dest, fdList *src)
 {
-    if (!src)
+    if (!src || !(src->head))
         return;
 
     if (*dest == NULL)

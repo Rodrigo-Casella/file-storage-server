@@ -13,15 +13,15 @@
     fprintf(stderr, "Errore in thread: %ld\n", pthread_self()); \
     pthread_exit((void *)EXIT_FAILURE);
 
-#define SEND_RESPONSE_CODE(fd, code)                       \
-    if (1)                                                 \
-    {                                                      \
-        int response_code = code;                          \
-        if (writen(fd, &response_code, sizeof(int)) == -1) \
-        {                                                  \
-            perror("writen");                              \
-            THREAD_ERR_EXIT;                               \
-        }                                                  \
+#define SEND_RESPONSE_CODE(fd, code)                                       \
+    if (1)                                                                 \
+    {                                                                      \
+        int response_code = code;                                          \
+        if (writen(fd, &response_code, sizeof(int)) == -1)                 \
+        {                                                                  \
+            perror("writen");                                              \
+            THREAD_ERR_EXIT;                                               \
+        }                                                                  \
     }
 
 #define SEND_ERROR_CODE(fd)                  \
@@ -54,7 +54,6 @@
     {                                                                                                            \
         fdNode *tmp = popNode(signalForLock);                                                                    \
         SEND_RESPONSE_CODE(tmp->fd, responseCode);                                                               \
-        logOperation(fs->logger_msg_queue, "signalWaitingForLock", "", tmp->fd, 0);                              \
         CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, &(tmp->fd), sizeof(int)); \
         deleteNode(tmp);                                                                                         \
     }                                                                                                            \
@@ -130,14 +129,17 @@ void *processRequest(void *args)
     BQueue_t *client_request_queue = ((ThreadArgs *)args)->queue;
     Filesystem *fs = ((ThreadArgs *)args)->fs;
     int managerFd = ((ThreadArgs *)args)->write_end_pipe_fd;
-    fdList *signalForLock = NULL;
 
     while (1)
     {
         int *client_fd = pop(client_request_queue);
 
         if (client_fd == EOS)
+        {
+            logOperation(fs->logger_msg_queue, "Termination message recived", "", 0, 0);
             break;
+        }
+            
 
         char *request_payload = NULL,
              *file_data_buf = NULL,
@@ -153,24 +155,11 @@ void *processRequest(void *args)
                evicted_files_size = 0,
                request_len = 0;
 
+        fdList *signalForLock = NULL;
+
         if (readRequestHeader(*client_fd, &request_code, &request_len) == -1)
         {
-            perror("readRequestHeader");
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
-            continue;
-        }
-
-        if (!request_code) // Se request_code == 0 vuol dire che il client ha terminato di inviare richieste
-        {
-            CHECK_AND_ACTION(clientExitHandler, ==, -1, perror("clientExitHandler"); THREAD_ERR_EXIT, fs, &signalForLock, *client_fd);
-            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
-
-            logOperation(fs->logger_msg_queue, "clientExit", "", *client_fd, 0);
-            SIGNAL_WAITING_FOR_LOCK(signalForLock, SUCCESS, managerFd);
-
-            *client_fd = 0;
-            CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
-            free(client_fd);
             continue;
         }
 
@@ -178,13 +167,28 @@ void *processRequest(void *args)
 
         if (!request_payload)
         {
-            perror("readRequestPayload");
             SEND_RESPONSE_CODE(*client_fd, SERVER_ERR);
             continue;
         }
 
         switch (request_code)
         {
+        case CLOSE_CONNECTION:
+            if (clientExitHandler(fs, &signalForLock, *client_fd) == -1)
+            {
+                SEND_ERROR_CODE(*client_fd);
+                break;
+            }
+
+            SEND_RESPONSE_CODE(*client_fd, SUCCESS);
+
+            SYSCALL_EQ_ACTION(close, -1, THREAD_ERR_EXIT, (*client_fd));
+
+            logOperation(fs->logger_msg_queue, "clientExit", "", *client_fd, 0);
+            SIGNAL_WAITING_FOR_LOCK(signalForLock, SUCCESS, managerFd);
+
+            *client_fd = 0; // così il thread manager saprà che un client e' uscito
+            break;
         case OPEN_FILE:
             if (readn(*client_fd, &open_file_flag, sizeof(int)) == -1)
             {
@@ -230,8 +234,6 @@ void *processRequest(void *args)
             {
                 if (writen(*client_fd, evicted_files_buf, evicted_files_size) == -1)
                     fprintf(stderr, "Errore inviando file al client\n");
-
-                free(evicted_files_buf);
             }
 
             evicted_files_size = 0; // Avverto il client che non ci sono più file da leggere
@@ -339,6 +341,9 @@ void *processRequest(void *args)
         if (file_data_buf)
             free(file_data_buf);
 
+        if (evicted_files_buf)
+            free(evicted_files_buf);
+
         if (!waitForLock)
         {
             CHECK_AND_ACTION(writen, ==, -1, perror("writen"); THREAD_ERR_EXIT, managerFd, client_fd, sizeof(int));
@@ -346,8 +351,6 @@ void *processRequest(void *args)
 
         free(client_fd);
     }
-
-    deleteList(&signalForLock);
 
     pthread_exit(NULL);
 }

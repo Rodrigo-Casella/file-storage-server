@@ -129,14 +129,11 @@ static File *evictFile(Filesystem *fs, File *toAdd)
             tmp = currFile;
             currFile = currFile->next;
 
-            if (fs->replacement_algo == SECOND_CHANCE)
+            if (fs->replacement_algo == SECOND_CHANCE && tmp != toAdd)
             {
                 // Ho troavto un file con il referenceBit settato a 0
                 if (res == 1)
                     break;
-
-                if (tmp == toAdd)
-                    continue;
 
                 // Sposto il file alla fine della coda
                 removeFileFromQueue(fs, tmp);
@@ -226,27 +223,20 @@ static File *initFile(const char *path)
     newFile->dataSize = 0;
 
     // inizializzo la mutex del file, setto errno e ritorno NULL in caso di errore
-    int errnum = 0;
-    CHECK_RET_AND_ACTION(pthread_mutex_init, !=, 0, errnum,
-                         fprintf(stderr, "pthread_mutex_init: %s\n", strerror(errnum));
-                         errno = errnum;
-                         return NULL,
-                                &(newFile->fileLock), NULL);
+    CHECK_PTHREAD_AND_ACTION(pthread_mutex_init, !=, 0, return NULL,
+                             &(newFile->fileLock), NULL);
 
     // iniziallizzo la variabile di condizione
-    CHECK_RET_AND_ACTION(pthread_cond_init, !=, 0, errnum,
-                         fprintf(stderr, "pthread_cond_init: %s\n", strerror(errnum));
-                         errno = errnum;
-                         return NULL,
-                                &(newFile->readWrite), NULL);
+    CHECK_PTHREAD_AND_ACTION(pthread_cond_init, !=, 0, return NULL,
+                             &(newFile->readWrite), NULL);
 
     newFile->isWritten = 0;
     newFile->nReaders = 0;
     // alloco e inizializzo la lista dei fd che hanno aperto il file, ritorno NULL in caso di errore
-    CHECK_RET_AND_ACTION(initList, ==, NULL, newFile->openedBy, perror("initList"); return NULL, NULL);
+    CHECK_RET_AND_ACTION(initList, ==, NULL, newFile->openedBy, ; return NULL, NULL);
 
     // alloco e inizializzo la lista dei fd che attendo di poter acquisire la lock sul file, ritorno NULL in caso di errore
-    CHECK_RET_AND_ACTION(initList, ==, NULL, newFile->waitingForLock, perror("initList"); return NULL, NULL);
+    CHECK_RET_AND_ACTION(initList, ==, NULL, newFile->waitingForLock, ; return NULL, NULL);
     // inizialmente il file non è in stato di locked
     newFile->lockedBy = 0;
 
@@ -309,7 +299,7 @@ static void deleteFile(Filesystem *fs, File *file, fdList **signalForLock)
     icl_hash_delete(fs->hastTable, file->path, NULL, NULL);
 
     // Se fornito mi salvo la lista dei client che attendono la lock su questo file
-    if (file->waitingForLock && signalForLock)
+    if (file->waitingForLock && *signalForLock)
     {
         *signalForLock = file->waitingForLock;
         file->waitingForLock = NULL;
@@ -487,13 +477,6 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **si
     // Dopo i check precedenti qua sono sicuro di creare un nuovo file solo se non esiste
     if (create)
     {
-        if (fs->currFiles == fs->maxFiles)
-        {
-            toEvict = evictFile(fs, NULL);
-            logOperation(fs->logger_msg_queue, "evicted", toEvict->path, clientFd, 0);
-            deleteFile(fs, toEvict, signalForLock);
-        }
-
         file = initFile(path);
 
         if (!file)
@@ -502,7 +485,30 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **si
             return -1;
         }
 
+        if (fs->currFiles == fs->maxFiles)
+        {
+            toEvict = evictFile(fs, NULL);
+            logOperation(fs->logger_msg_queue, "evicted", toEvict->path, clientFd, 0);
+            deleteFile(fs, toEvict, signalForLock);
+        }
+
+        CHECK_AND_ACTION(insertNode, ==, -1,
+                         UNLOCK(&(file->fileLock));
+                         UNLOCK(&(fs->fileSystemLock)); errno = ENOMEM; return -1, file->openedBy, clientFd);
+
+        logOperation(fs->logger_msg_queue, "openFile", path, clientFd, 0);
+
+        if (lock)
+        {
+            file->lockedBy = clientFd;
+            logOperation(fs->logger_msg_queue, "open-lock", path, clientFd, 0);
+        }
+
         addFile(fs, file);
+
+        UNLOCK(&(fs->fileSystemLock));
+
+        return 0;
     }
 
     LOCK(&(file->fileLock));
@@ -510,7 +516,7 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **si
     if (lock)
     {
         // il file è già in stato di lock
-        if (file->lockedBy && (file->lockedBy != clientFd))
+        if (file->lockedBy && file->lockedBy != clientFd)
         {
             UNLOCK(&(file->fileLock));
             UNLOCK(&(fs->fileSystemLock));
@@ -521,13 +527,11 @@ int openFileHandler(Filesystem *fs, const char *path, int openFlags, fdList **si
         file->lockedBy = clientFd;
     }
 
-    // Se il file non è stato già aperto dal client allora aggiungo il suo fd alla lista dei processi che hanno aperto il file
-    if (!findNode(file->openedBy, clientFd))
-    {
-        CHECK_AND_ACTION(insertNode, ==, -1,
-                         UNLOCK(&(file->fileLock));
-                         UNLOCK(&(fs->fileSystemLock)); errno = ENOMEM; return -1, file->openedBy, clientFd);
-    }
+    CHECK_AND_ACTION(insertNode, ==, -1,
+                     UNLOCK(&(file->fileLock));
+                     UNLOCK(&(fs->fileSystemLock)); errno = ENOMEM; return -1, file->openedBy, clientFd);
+
+    logOperation(fs->logger_msg_queue, "openFile", path, clientFd, 0);
 
     if (lock)
         logOperation(fs->logger_msg_queue, "open-lock", path, clientFd, 0);
@@ -576,6 +580,7 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         UNLOCK(&(file->fileLock));
         UNLOCK(&(fs->fileSystemLock));
         errno = EACCES;
+        return -1;
     }
 
     // I dati da scrivere sono troppi per lo storage
@@ -609,6 +614,8 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
 
     while (fs->currMemory + dataSize > fs->maxMemory)
     {
+        tmp_signalForLock = NULL;
+
         toEvict = evictFile(fs, file);
 
         logOperation(fs->logger_msg_queue, "evicted", toEvict->path, clientFd, 0);
@@ -618,6 +625,8 @@ int writeFileHandler(Filesystem *fs, const char *path, void *data, size_t dataSi
         deleteFile(fs, toEvict, &tmp_signalForLock);
 
         concanateList(signalForLock, tmp_signalForLock);
+
+        deleteList(&tmp_signalForLock);
     }
 
     *evicted_files = toEvict_buf;

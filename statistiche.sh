@@ -18,7 +18,7 @@ fi
 
 echo -e -n "Media byte letti: ${mean_bytes_read}\n"
 
-write_op=$(grep "readFile" -c $1)
+write_op=$(grep "writeFile" -c $1)
 mean_bytes_write=0
 
 echo -e -n "Numero operazioni di write: ${write_op}\n"
@@ -40,6 +40,9 @@ grep "open-lock" -c $1
 echo -e -n "Numero di operazioni di unlock: "
 grep "unlockFile" -c $1
 
+echo -e -n "Numero di operazioni di open: "
+grep "openFile" -c $1
+
 echo -e -n "Numero di operazioni di close: "
 grep "closeFile" -c $1
 
@@ -49,8 +52,8 @@ grep -zoP 'absMaxMemory\n.*\nbytesProcessed: [0-9]+' $1 | grep -aEo '[0-9]+' | {
 echo -e -n "Numero di file massimo raggiunto dallo storage: "
 grep -zoP 'absMaxFiles\n.*\nbytesProcessed: [0-9]+' $1 | grep -aEo '[0-9]+'
 
-echo -e -n "Numero di espulsiuoni dalla cache: "
-grep "expulsed" -c $1
+echo -e -n "Numero di espulsioni dalla cache: "
+grep "evicted" -c $1
 
 echo "Numero richieste servite da ogni thread: "
 grep -o "workerTid: .*" $1 | sort | uniq -c

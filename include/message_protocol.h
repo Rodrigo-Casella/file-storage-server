@@ -1,6 +1,7 @@
 #ifndef MESSAGE_PROTOCOL_H
 #define MESSAGE_PROTOCOL_H
 
+#define CLOSE_CONNECTION 0
 #define OPEN_FILE 1
 #define WRITE_FILE 2
 #define APPEND_FILE 3

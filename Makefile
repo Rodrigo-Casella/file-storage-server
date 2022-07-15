@@ -74,6 +74,10 @@ test1:	server client
 test2:	server client
 	./tests/test2.sh
 
+test3:	server client
+	./tests/test3.sh
+	./statistiche.sh logs.txt
+
 clean:
 	rm -rf $(ODIR) $(BDIR) $(LIBDIR)
 

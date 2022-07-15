@@ -1,7 +1,6 @@
 #include "../include/define_source.h"
 
 #include <assert.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -28,39 +27,50 @@
 #define DFL_BACKLOG 5
 #define DFL_REPL_ALG 0
 
-#define QUEUE_LEN 10
+#define QUEUE_LEN 50
 
-#define GET_NUMERIC_SETTING_VAL(settings, key, val, default, op, cond)              \
-    if (1)                                                                          \
-    {                                                                               \
-        errno = 0;                                                                  \
-        if ((val = getNumericValue(settings, key)) == -1 || val op cond)            \
-        {                                                                           \
-            val = default;                                                          \
-        }                                                                           \
+#define GET_NUMERIC_SETTING_VAL(settings, key, val, default, op, cond)   \
+    if (1)                                                               \
+    {                                                                    \
+        errno = 0;                                                       \
+        if ((val = getNumericValue(settings, key)) == -1 || val op cond) \
+        {                                                                \
+            val = default;                                               \
+        }                                                                \
     }
 
-#define GET_SETTING_VAL(settings, key, val, default)                               \
-    if (1)                                                                         \
-    {                                                                              \
-        if ((val = getValue(settings, key)) == NULL)                               \
-        {                                                                          \
-            val = strdup(default);                                                 \
-            if (!val)                                                              \
-            {                                                                      \
-                perror("strdup " default);                                         \
-                if (settings)                                                      \
-                    freeSettingList(&settings);                                    \
-                                                                                   \
-                exit(EXIT_FAILURE);                                                \
-            }                                                                      \
-        }                                                                          \
+#define GET_SETTING_VAL(settings, key, val, default) \
+    if (1)                                           \
+    {                                                \
+        if ((val = getValue(settings, key)) == NULL) \
+        {                                            \
+            val = strdup(default);                   \
+            if (!val)                                \
+            {                                        \
+                perror("strdup " default);           \
+                if (settings)                        \
+                    freeSettingList(&settings);      \
+                                                     \
+                exit(EXIT_FAILURE);                  \
+            }                                        \
+        }                                            \
     }
 
 #define FILESYSTEM_STATS(maxFiles, maxMemory, evictedFiles) \
     printf("Numero massimo di file: %ld\nDimensione massimma raggiunta: %ld\nNumero di vittime: %ld\n", maxFiles, maxMemory, evictedFiles);
 
-int hardQuit, softQuit;
+char *sockname = "";
+
+volatile sig_atomic_t hardQuit = 0,
+                      softQuit = 0;
+
+void signal_handler(int signum)
+{
+    if (signum == SIGHUP)
+        softQuit = 1;
+    else
+        hardQuit = 1;
+}
 
 int updatemax(fd_set set, int fdmax)
 {
@@ -73,15 +83,8 @@ int updatemax(fd_set set, int fdmax)
 
 void cleanup()
 {
-    unlink(DFL_SOCKET);
-}
-
-void server_shutdown_handler(int signum)
-{
-    if (signum == SIGHUP)
-        softQuit = 1;
-    else
-        hardQuit = 1;
+    unlink(sockname);
+    free(sockname);
 }
 
 int main(int argc, char const *argv[])
@@ -103,8 +106,7 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    char *sockname,
-        *logs_file;
+    char *logs_file;
 
     size_t maxFiles,
         maxMemory,
@@ -134,7 +136,27 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(pipe, -1, exit(EXIT_FAILURE), workerManagerPipe);
     // Ignoro SIGPIPE
     SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGPIPE, &(const struct sigaction){.sa_handler = SIG_IGN}, NULL);
-    SYSCALL_EQ_ACTION(fcntl, -1, exit(EXIT_FAILURE), workerManagerPipe[0], F_SETFL, O_NONBLOCK);
+
+    // Blocco i segnali SIGINT, SIGQUIT e SIGHUP.
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGHUP);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGQUIT);
+
+    struct sigaction act;
+    memset(&act, 0, sizeof(act));
+
+    act.sa_handler = signal_handler;
+    act.sa_mask = mask;
+
+    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGHUP, &act, NULL);
+    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGINT, &act, NULL);
+    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGQUIT, &act, NULL);
+
+    if (pthread_sigmask(SIG_BLOCK, &mask, NULL) != 0)
+        exit(EXIT_FAILURE);
 
     // Inizializzo il filesystem
     Filesystem *fs = NULL;
@@ -142,6 +164,13 @@ int main(int argc, char const *argv[])
 
     if (!fs)
         exit(EXIT_FAILURE);
+
+    // Inizializzo e creo il thread che si occupera di scrivere il file di log
+    pthread_t logger;
+    FileLogger logger_args = {.filesystem = fs};
+    strncpy(logger_args.logFilePath, logs_file, PATH_MAX);
+
+    CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &logger, NULL, &writeLogToFile, (void *)&logger_args);
 
     // Passo i riferimenti alla struttura per gli argomenti dei thread
     ThreadArgs *th_args = malloc(sizeof(*th_args));
@@ -164,21 +193,8 @@ int main(int argc, char const *argv[])
         CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &workers[i], NULL, &processRequest, (void *)th_args);
     }
 
-    // Inizializzo e creo il thread che si occupera di scrivere il file di log
-    pthread_t logger;
-    FileLogger logger_args = {.filesystem = fs};
-    strncpy(logger_args.logFilePath, logs_file, PATH_MAX);
-
-    CHECK_PTHREAD_AND_ACTION(pthread_create, !=, 0, exit(EXIT_FAILURE), &logger, NULL, &writeLogToFile, (void *)&logger_args);
-
-    // Imposto l'handler per la gestione dei segnali SIGINT, SIGQUIT e SIGHUP
-    struct sigaction act;
-    memset(&act, 0, sizeof(act));
-    act.sa_handler = server_shutdown_handler;
-
-    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGINT, &act, NULL);
-    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGQUIT, &act, NULL);
-    SYSCALL_EQ_ACTION(sigaction, -1, exit(EXIT_FAILURE), SIGHUP, &act, NULL);
+    if (pthread_sigmask(SIG_UNBLOCK, &mask, NULL) != 0)
+        exit(EXIT_FAILURE);
 
     // Imposto l'indirizzo della socket del server
     struct sockaddr_un server_addr;
@@ -204,8 +220,6 @@ int main(int argc, char const *argv[])
     SYSCALL_EQ_ACTION(bind, -1, exit(EXIT_FAILURE), listen_fd, (const struct sockaddr *)&server_addr, sizeof(server_addr));
     SYSCALL_EQ_ACTION(listen, -1, exit(EXIT_FAILURE), listen_fd, SOMAXCONN);
 
-    // Esco quando ricevo i segnali di terminazione
-    hardQuit = 0, softQuit = 0;
     while (!hardQuit)
     {
 
@@ -286,7 +300,6 @@ int main(int argc, char const *argv[])
     }
 
 shutdown:
-    SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
     printf("\nChiudendo il server\n");
     // Mando segnale di terminazione ai thread worker
     for (int i = 0; i < nThreads; i++)
@@ -297,6 +310,8 @@ shutdown:
     {
         CHECK_PTHREAD_AND_ACTION(pthread_join, !=, 0, exit(EXIT_FAILURE), workers[i], NULL);
     }
+
+    SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), listen_fd);
 
     logOperation(fs->logger_msg_queue, "absMaxMemory", "", listen_fd, fs->absMaxMemory);
     logOperation(fs->logger_msg_queue, "absMaxFiles", "", listen_fd, fs->absMaxFiles);
@@ -310,9 +325,6 @@ shutdown:
     // E attendo la sua effettiva terminazione
     CHECK_PTHREAD_AND_ACTION(pthread_join, !=, 0, exit(EXIT_FAILURE), logger, NULL);
     free(logs_file);
-
-    SYSCALL_EQ_ACTION(unlink, -1, exit(EXIT_FAILURE), sockname);
-    free(sockname);
 
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), workerManagerPipe[0]);
     SYSCALL_EQ_ACTION(close, -1, exit(EXIT_FAILURE), workerManagerPipe[1]);

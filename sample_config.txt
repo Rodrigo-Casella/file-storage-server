@@ -12,7 +12,7 @@ MAXMEMORY=60
 MAXFILES=10
 
 # Nome della socket
-SOCKNAME=mysock.sk
+SOCKNAME=LSOfiletorage.sk
 
 # Algoritmo di rimpiazzamento dei file: FIFO = 0, LRU = 1, LFU = 2, SECOND-CHANCE = 3
 REPL_ALG=0
