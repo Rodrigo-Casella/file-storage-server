@@ -132,10 +132,11 @@ int closeConnection(const char *sockname)
     sockname_buf_len = strlen(sockname);
 
     sockname_buf = strdup(sockname);
-    sockname_buf[sockname_buf_len++] = '\0';
 
     if (!sockname_buf)
         return -1;
+
+    sockname_buf[sockname_buf_len++] = '\0';
 
     if (buildRequest(request, ARRAY_SIZE(request), &op, &sockname_buf_len, sockname_buf) == -1)
         return -1;
@@ -169,10 +170,11 @@ int openFile(const char *pathname, int flags)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
@@ -212,10 +214,11 @@ int writeFile(const char *pathname, const char *dirname)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     file_data_buf = readFileFromPath(pathname, &file_len);
 
@@ -257,6 +260,70 @@ int writeFile(const char *pathname, const char *dirname)
     return errno ? -1 : 0;
 }
 
+int appendToFile(const char* pathname, void* buf, size_t size, const char* dirname)
+{
+    int op = APPEND_FILE,
+        files_read;
+
+    char *pathname_buf,
+        *file_data_buf;
+
+    size_t pathname_len,
+        file_len;
+
+    struct iovec request[5];
+
+    if (!pathname || (pathname_len = strlen(pathname)) < 1 || !buf || size <= 0)
+    {
+        errno = EINVAL;
+        return -1;
+    }
+
+    pathname_buf = strdup(pathname);
+
+    if (!pathname_buf)
+        return -1;
+
+    pathname_buf[pathname_len++] = '\0';
+
+    file_data_buf = (char *)buf;
+
+    file_len = size;
+
+    memset(request, 0, sizeof(request));
+
+    if (buildRequest(request, ARRAY_SIZE(request), &op, &pathname_len, pathname_buf) == -1)
+        return -1;
+
+    request[3].iov_base = &file_len;
+    request[3].iov_len = sizeof(size_t);
+
+    request[4].iov_base = file_data_buf;
+    request[4].iov_len = file_len;
+
+    if (writev(fd_skt, request, ARRAY_SIZE(request)) == -1)
+    {
+        perror("writev");
+        return -1;
+    }
+
+    free(pathname_buf);
+
+    SERVER_RESPONSE(appendToFile, pathname);
+
+    PRINT_RDWR_BYTES(file_len, scritti);
+
+    if (!errno)
+    {
+        files_read = readMultipleFilesFromServer(fd_skt, dirname);
+
+        if (toPrint)
+            printf("Il server ha inviato %d files.\n", files_read);
+    }
+
+    return errno ? -1 : 0;
+}
+
 int readFile(const char *pathname, void **buf, size_t *size)
 {
     int op = READ_FILE;
@@ -274,10 +341,11 @@ int readFile(const char *pathname, void **buf, size_t *size)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
@@ -378,10 +446,11 @@ int lockFile(const char *pathname)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
@@ -421,10 +490,11 @@ int unlockFile(const char *pathname)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
@@ -464,10 +534,11 @@ int removeFile(const char *pathname)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
@@ -507,10 +578,11 @@ int closeFile(const char *pathname)
     }
 
     pathname_buf = strdup(pathname);
-    pathname_buf[pathname_len++] = '\0';
 
     if (!pathname_buf)
         return -1;
+
+    pathname_buf[pathname_len++] = '\0';
 
     memset(request, 0, sizeof(request));
 
