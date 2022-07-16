@@ -57,18 +57,20 @@
 
 #define INVALID_ARGUMENT(option, arg) fprintf(stderr, "Errore opzione -%c: argomento '%s' non valido.\n", option, arg)
 
-#define CALL_API_ON_TOKEN(api, arg)                 \
-    if (1)                                          \
-    {                                               \
-        char *savePtr;                              \
-        char *token = strtok_r(arg, ",", &savePtr); \
-                                                    \
-        while (token)                               \
-        {                                           \
-            if (api(token) == -1)                   \
-                PRINT(perror(#api));                \
-            token = strtok_r(NULL, ",", &savePtr);  \
-        }                                           \
+#define CALL_API_ON_TOKEN(api, arg)                                                                                                                                                \
+    if (1)                                                                                                                                                                         \
+    {                                                                                                                                                                              \
+        char *savePtr;                                                                                                                                                             \
+        char *token = strtok_r(arg, ",", &savePtr);                                                                                                                                \
+                                                                                                                                                                                   \
+        while (token)                                                                                                                                                              \
+        {                                                                                                                                                                          \
+            char resolved_path[PATH_MAX];                                                                                                                                          \
+            CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", token); break, token, resolved_path); \
+            if (api(resolved_path) == -1)                                                                                                                                          \
+                PRINT(perror(#api));                                                                                                                                               \
+            token = strtok_r(NULL, ",", &savePtr);                                                                                                                                 \
+        }                                                                                                                                                                          \
     }
 
 #define CHECK_SAVE_DIR(nextOption, d_or_D, saveDir) \
@@ -166,7 +168,7 @@ int readFileHandler(const char *file_path, const char *save_dir)
         if (toPrint)
             printf("Salvando file su %s\n", save_dir);
 
-        if (writeFileToDir(save_dir, file_path, buf, size) == -1)
+        if (writeFileToDir(save_dir, resolved_path, buf, size) == -1)
             PRINT(perror("writeFileToDir"));
     }
 

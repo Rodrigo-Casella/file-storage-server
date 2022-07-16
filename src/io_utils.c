@@ -96,6 +96,7 @@ int writeFileToDisk(const char *path, void *buf, size_t size)
 
     int file_fd;
 
+    errno = 0;
     if (!path || !buf || size < 1)
     {
         errno = EINVAL;
@@ -165,6 +166,8 @@ char *readFileFromPath(const char *path, size_t *file_len)
 
     FILE *fp;
 
+    errno = 0;
+
     if ((fp = fopen(path, "r")) == NULL)
         return NULL;
 
@@ -206,6 +209,8 @@ char *readFileFromServer(int fd_skt, size_t *file_len)
 {
     char *file_data;
 
+    errno = 0;
+
     if (readn(fd_skt, file_len, sizeof(size_t)) == -1)
         return NULL;
 
@@ -231,8 +236,7 @@ int readMultipleFilesFromServer(int fd_skt, const char *save_dir)
     int files_read;
         
     char *file_path,
-        *file_data,
-        *save_dir_path_buf;
+        *file_data;
 
     size_t file_path_len,
         file_len;
@@ -240,7 +244,7 @@ int readMultipleFilesFromServer(int fd_skt, const char *save_dir)
     files_read = 0;
     while (1)
     {
-        file_data = save_dir_path_buf = NULL;
+        file_data = NULL;
 
         file_path_len = file_len = 0;
 
@@ -254,22 +258,13 @@ int readMultipleFilesFromServer(int fd_skt, const char *save_dir)
 
         file_data = readFileFromServer(fd_skt, &file_len);
 
-        if (file_len <= 0 || !file_data)
-        {
+        if (save_dir && file_data)
+            writeFileToDir(save_dir, file_path, file_data, file_len);
+
+        if (file_path)
             free(file_path);
-
-            if (file_data)
-                free(file_data);
-
-            return -1;
-        }
-
-        if (save_dir)
-            if (writeFileToDir(save_dir, file_path, file_data, file_len) == -1)
-                perror("writeFileToDir");
-
-        free(file_path);
-        free(file_data);
+        if (file_data)
+            free(file_data);
 
         
         files_read++;

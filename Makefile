@@ -82,4 +82,4 @@ clean:
 	rm -rf $(ODIR) $(BDIR) $(LIBDIR)
 
 cleanall:
-	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2 tests/evicted1 tests/evicted2 tests/evicted3 tests/evicted4
+	rm -rf $(ODIR) $(BDIR) $(LIBDIR) logs.txt tests/test1tmp1 tests/test1tmp2 tests/evicted1 tests/evicted2 tests/evicted3 tests/evicted4 tests/evicted5 tests/test3tmp

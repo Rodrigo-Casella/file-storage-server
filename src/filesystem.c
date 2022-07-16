@@ -832,18 +832,17 @@ int lockFileHandler(Filesystem *fs, const char *path, int clientFd)
     if (file->lockedBy && file->lockedBy != clientFd)
     {
         CHECK_AND_ACTION(insertNode, ==, -1, return -1, file->waitingForLock, clientFd);
-        UNLOCK(&(file->fileLock));
         logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 1);
+        UNLOCK(&(file->fileLock));
         return -2;
     }
 
     file->lockedBy = clientFd;
+    logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 0);
 
     BCAST(&(file->readWrite));
 
     UNLOCK(&(file->fileLock));
-
-    logOperation(fs->logger_msg_queue, "lockFile", path, clientFd, 0);
 
     return 0;
 }
@@ -921,17 +920,23 @@ int removeFileHandler(Filesystem *fs, const char *path, fdList **signalForLock, 
 
     file = getFile(fs, path);
 
-    // il file non esiste oppure è in stato di lock da parte di un altro processo e/o non è in stato di lock
-    if (!file || file->lockedBy != clientFd)
+    // il file non esiste
+    if (!file)
     {
         UNLOCK(&(fs->fileSystemLock));
-        errno = !file ? ENOENT : EACCES;
+        errno = ENOENT;
+        return -1;
+    }
+    // il file è in stato di lock da parte di un altro processo o non è in stato di lock
+    if (!file->lockedBy || file->lockedBy != clientFd)
+    {
+        UNLOCK(&(fs->fileSystemLock));
+        errno = !file->lockedBy ? EINVAL : EACCES;
         return -1;
     }
 
-    logOperation(fs->logger_msg_queue, "removeFile", path, clientFd, 0);
-
     deleteFile(fs, file, signalForLock);
+    logOperation(fs->logger_msg_queue, "removeFile", path, clientFd, 0);
 
     UNLOCK(&(fs->fileSystemLock));
 

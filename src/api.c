@@ -17,8 +17,6 @@
 #include "../include/message_protocol.h"
 #include "../include/utils.h"
 
-#define CHUNK_SIZE 1024
-
 const char *responseMsg[] = {
     "Ok\n",
     "Richiesta invalida\n",
@@ -374,7 +372,8 @@ int readFile(const char *pathname, void **buf, size_t *size)
 
 int readNFiles(int N, const char *dirname)
 {
-    int op = READ_N_FILE;
+    int op = READ_N_FILE,
+        files_read;
 
     char *files_to_read_buf;
 
@@ -415,13 +414,15 @@ int readNFiles(int N, const char *dirname)
     }
 
     SERVER_RESPONSE(readNFiles, files_to_read_buf);
-
+    
     free(files_to_read_buf);
 
-    if (errno)
-        return -1;
+    files_read = 0;
 
-    int files_read = readMultipleFilesFromServer(fd_skt, dirname);
+    if (!errno)
+    {
+        files_read = readMultipleFilesFromServer(fd_skt, dirname);
+    }
 
     if (toPrint)
         printf("Ho letto %d files dal server.\n", files_read);
