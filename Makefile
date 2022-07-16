@@ -11,11 +11,14 @@ OBJCLIENT = $(addprefix $(ODIR)/, $(_OBJCLIENT))
 _OBJIOUTILS = io_utils.o
 OBJIOUTILS = $(addprefix $(ODIR)/, $(_OBJIOUTILS))
 
+_LIBIO = libio_utils.so
+LIBIO = $(addprefix $(LIBDIR)/, $(_LIBIO))
+
 _OBJAPI = api.o
 OBJAPI = $(addprefix $(ODIR)/, $(_OBJAPI))
 
-_LIB = libapi.so
-LIB = $(addprefix $(LIBDIR)/, $(_LIB))
+_LIBAPI = libapi.so
+LIBAPI = $(addprefix $(LIBDIR)/, $(_LIBAPI))
 
 _OBJSERVERPTHREAD = server.o worker.o boundedqueue.o filesystem.o logger.o
 OBJSERVERPTHREAD = $(addprefix $(ODIR)/, $(_OBJSERVERPTHREAD))
@@ -26,7 +29,7 @@ OBJSERVER = $(addprefix $(ODIR)/, $(_OBJSERVER))
 CC = gcc -g -std=c99 -pedantic
 PTHREAD = -pthread
 CFLAGS = -Wall
-APILIB = -lapi
+LIBS = -lapi -lio_utils
 LDFLAG = -lpthread
 
 .PHONY: all clean cleanall test1 test2
@@ -34,20 +37,23 @@ LDFLAG = -lpthread
 all: client server
 
 
-client: $(OBJIOUTILS) $(OBJCLIENT) $(LIB) | $(BDIR)
-	$(CC) -o $(BDIR)/$@ $(CFLAGS) $(OBJCLIENT) $(OBJIOUTILS) -Wl,-rpath=$(LIBDIR) -L$(LIBDIR) $(APILIB)
+client: $(OBJCLIENT) $(LIBAPI) $(LIBIO) | $(BDIR)
+	$(CC) -o $(BDIR)/$@ $(CFLAGS) $(OBJCLIENT) -Wl,-rpath=$(LIBDIR) -L$(LIBDIR) $(LIBS)
 
 $(OBJCLIENT): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -o $@ $(CFLAGS) $<
 
-$(LIB): $(OBJIOUTILS) $(OBJAPI) | $(LIBDIR)
+$(LIBAPI): $(OBJAPI) | $(LIBDIR)
 	$(CC) -shared -o $@ $(CFLAGS) $(OBJAPI)
 
 $(OBJAPI): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
 	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
+$(LIBIO): $(OBJIOUTILS) | $(LIBDIR)
+	$(CC) -shared -o $@ $(CFLAGS) $(OBJIOUTILS)
+
 $(OBJIOUTILS): $(ODIR)/%.o: $(SDIR)/%.c | $(ODIR)
-	$(CC) -c -o $@ $(CFLAGS) $<
+	$(CC) -c -fPIC -o $@ $(CFLAGS) $<
 
 server: $(OBJSERVER) $(OBJSERVERPTHREAD) | $(BDIR)
 	$(CC) $(PTHREAD) -o $(BDIR)/$@ $(CFLAGS) $^ $(LDFLAG)

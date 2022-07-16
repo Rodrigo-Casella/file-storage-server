@@ -12,6 +12,8 @@ for i in {1..10}; do
     clients_pids+=($!)
 done
 
+echo "Test avviato attendere ${TEST_DURATION} secondi"
+
 sleep ${TEST_DURATION}
 
 kill -s SIGINT ${SERVER_PID}
