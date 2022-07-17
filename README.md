@@ -22,6 +22,10 @@ To start the server run:
 
 `bin/server path-to-configuration-file.txt`
 
+The server will produce a log file; to view statics run:
+
+`./statistiche.sh path-to-log-file.txt`
+
 To start the client run:
 
 `bin/client -f server-socket [options]`
@@ -36,11 +40,11 @@ To clean the working directory run:
 
 Three test are provided to measure the performance of the server:
 
-`make test1` will run the server with `valgrind leak-check=full`
+`make test1` will run the server with `valgrind leak-check=full` and run the statics script and the end of the test
 
 `make test2` will run the server with four different eviction policies: `FIFO`, `LRU`, `LFU` and `Second-chance`
 
-`make test3` will run a stress test for the server
+`make test3` will run a stress test for the server and run the statics script and the end of the test
 
 To clean the working directory from the files produced by the tests run:
 
