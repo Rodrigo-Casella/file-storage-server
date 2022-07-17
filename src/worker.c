@@ -171,6 +171,7 @@ void *processRequest(void *args)
             continue;
         }
 
+        errno = 0;
         switch (request_code)
         {
         case CLOSE_CONNECTION:

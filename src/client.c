@@ -66,6 +66,7 @@
         while (token)                                                                                                                                                              \
         {                                                                                                                                                                          \
             char resolved_path[PATH_MAX];                                                                                                                                          \
+            errno = 0;                                                                                                                                                             \
             CHECK_AND_ACTION(realpath, ==, NULL, perror("realpath"); fprintf(stderr, "Non e' stato possibile risolvere il percorso di %s\n", token); break, token, resolved_path); \
             if (api(resolved_path) == -1)                                                                                                                                          \
                 PRINT(perror(#api));                                                                                                                                               \
@@ -100,6 +101,7 @@ int writeFileHandler(const char *file_path, const char *save_dir)
 {
     char resolved_path[PATH_MAX];
 
+    errno = 0;
     if (!file_path)
     {
         errno = EINVAL;
@@ -143,6 +145,7 @@ int readFileHandler(const char *file_path, const char *save_dir)
 
     size_t size;
 
+    errno = 0;
     if (!file_path)
     {
         errno = EINVAL;
@@ -190,6 +193,7 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWr
     struct stat info;
     char *currPath = NULL;
 
+    errno = 0;
     SYSCALL_RET_EQ_ACTION(opendir, NULL, dir, return -1, dirToWrite);
 
     // ciclo finché trovo entry oppure ho raggiunto il limite superiore di files da scrivere
@@ -210,8 +214,13 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWr
         strcat(currPath, "/");
         strcat(currPath, entry->d_name);
 
+        // Se c'è un errore con stat allora passo al prossimo file;
         if (stat(currPath, &info) == -1)
+        {
             PRINT(perror("stat"));
+            free(currPath);
+            continue;
+        }
 
         if (S_ISDIR(info.st_mode))
         {
@@ -224,11 +233,12 @@ int writeDirHandler(char *dirToWrite, const char *dirToSave, const int filesToWr
         }
         else
         {
+            // Se ho un errore scrivendo un file passo semplicemente al prossimo, ma non aggiorno il contatore
             if (writeFileHandler(currPath, dirToSave) == -1)
             {
-                closedir(dir);
                 free(currPath);
-                return 0;
+                continue;
+                ;
             }
 
             (*filesWritten)++;
@@ -354,6 +364,7 @@ int main(int argc, char *argv[])
 
             if (writeDirHandler(dirToWrite, saveDir, filesToWrite, &filesWritten) || filesWritten <= 0)
                 PRINT(fprintf(stderr, "Non è stato possibile scrivere i file della directory %s sul server.\n", dirToWrite));
+            PRINT(printf("writeDir: Ho scritto %d files sul server.\n", filesWritten));
             break;
         case 'W':;
             CHECK_SAVE_DIR(selectedOption->next, 'D', saveDir);
