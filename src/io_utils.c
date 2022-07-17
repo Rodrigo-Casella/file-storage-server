@@ -10,30 +10,6 @@
 #include "../include/utils.h"
 
 /**
- * @brief Rimuove la sottostringa 'sub' dalla stringa 'str'.
- *
- * @param str stringa originale
- * @param sub sotto-stringa da rimuovere
- * @return la stringa orginiale meno la sottostringa
- */
-/*static char *strremove(char *str, const char *sub)
-{
-    char *p, *q, *r;
-    if ((q = r = strstr(str, sub)) != NULL)
-    {
-        size_t len = strlen(sub);
-        while ((r = strstr(p = r + len, sub)) != NULL)
-        {
-            while (p < r)
-                *q++ = *p++;
-        }
-        while ((*q++ = *p++) != '\0')
-            continue;
-    }
-    return str;
-}*/
-
-/**
  * @brief Crea ricorsivamente cartelle
  *
  * @note Adattato da https://nachtimwald.com/2019/07/10/recursive-create-directory-in-c-revisited/
@@ -102,8 +78,6 @@ int writeFileToDisk(const char *path, void *buf, size_t size)
         errno = EINVAL;
         return -1;
     }
-
-    // path = strremove(path, "../");
 
     lastDir = strrchr(path, '/'); // path meno le cartelle fino al filename
 
